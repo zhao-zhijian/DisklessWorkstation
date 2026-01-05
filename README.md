@@ -31,7 +31,39 @@ conan install . -pr=conan_profiles/msvc-vs2022 --build=missing -of build
 
 ### 2. 使用 CMake 构建项目
 
-安装依赖后，可以使用 CMake 构建项目：
+**重要：** 使用 CMake Presets 之前，必须先完成步骤 1 安装依赖，确保 `build/conan_toolchain.cmake` 文件存在。
+
+#### 方式一：使用自动化脚本（最简单）
+
+Windows 下可以使用提供的批处理脚本一键完成所有步骤：
+
+```bash
+# 完整构建流程（包括依赖安装）
+build.bat
+
+# 如果依赖已安装，可以跳过安装步骤
+build.bat --skip-install
+```
+
+脚本会自动执行：
+1. 检查构建工具（Conan、CMake）
+2. 安装 Conan 依赖
+3. 配置 CMake 项目
+4. 构建项目（Release 配置）
+
+#### 方式二：使用 CMake Presets（推荐）
+
+CMake Presets 由 Conan 自动生成，位于 `build/CMakePresets.json`。
+
+```bash
+# 配置项目
+cmake --preset conan-default
+
+# 构建项目（Release 配置）
+cmake --build --preset conan-release
+```
+
+#### 方式三：传统 CMake 命令
 
 ```bash
 cd build
@@ -39,17 +71,11 @@ cmake .. -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake
 cmake --build . --config Release
 ```
 
-或者使用 CMake Presets：
-
-```bash
-cmake --preset conan-default
-cmake --build --preset conan-default
-```
-
 ## 项目结构
 
 ```
 DisklessWorkstation/
+├── build.bat                 # Windows 自动化构建脚本
 ├── conanfile.py              # Conan 配置文件
 ├── conan_profiles/           # Conan 编译器配置
 │   └── msvc-vs2022          # MSVC VS2022 配置

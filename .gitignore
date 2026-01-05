@@ -1,3 +1,9 @@
+# CMakeUserPresets.json
+CMakeUserPresets.json
+
+# IDE files
+.vscode/
+
 # Build directory
 build/
 
