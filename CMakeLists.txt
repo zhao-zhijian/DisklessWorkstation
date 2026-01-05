@@ -35,6 +35,7 @@ find_package(Boost REQUIRED)
 # 添加可执行文件
 add_executable(${PROJECT_NAME}
     src/main.cpp
+    src/torrent_creator.cpp
 )
 
 # 添加 Windows 定义
@@ -43,6 +44,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
 )
+
+# 设置 MSVC 编译器使用 UTF-8 编码，解决 C4819 警告
+if(MSVC)
+    target_compile_options(${PROJECT_NAME} PRIVATE /utf-8)
+endif()
 
 # 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE

@@ -1,92 +1,94 @@
 #include <iostream>
-#include <thread>
-#include <chrono>
-#include <libtorrent/session.hpp>
-#include <libtorrent/session_params.hpp>
-#include <libtorrent/add_torrent_params.hpp>
-#include <libtorrent/torrent_handle.hpp>
-#include <libtorrent/torrent_status.hpp>
-#include <libtorrent/alert_types.hpp>
-#include <libtorrent/magnet_uri.hpp>
+#include <filesystem>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+#include <libtorrent/version.hpp>
+#include "torrent_creator.hpp"
 
-int main()
+int main(int argc, char* argv[])
 {
+#ifdef _WIN32
+    // 设置控制台代码页为 UTF-8，解决中文乱码问题
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+#endif
+
     try
     {
-        std::cout << "=== LibTorrent 2.0.10 Simple Example ===" << std::endl;
+        std::cout << "=== LibTorrent Torrent 生成器 ===" << std::endl;
         std::cout << "LibTorrent Version: " << LIBTORRENT_VERSION << std::endl;
         std::cout << std::endl;
 
-        // Create session parameters
-        lt::session_params params;
-        params.settings.set_int(lt::settings_pack::alert_mask,
-            lt::alert_category::error | lt::alert_category::status);
-
-        // Create session
-        lt::session ses(params);
-
-        std::cout << "Session created successfully" << std::endl;
-        std::cout << "Listening port: " << ses.listen_port() << std::endl;
-        std::cout << std::endl;
-
-        // Show current torrent count
-        std::vector<lt::torrent_handle> torrents = ses.get_torrents();
-        std::cout << "Current torrent count: " << torrents.size() << std::endl;
-        std::cout << std::endl;
-
-        // Example: Parse magnet link (without actual download)
-        std::cout << "=== Magnet Link Parse Example ===" << std::endl;
-        std::string magnet_uri = "magnet:?xt=urn:btih:1234567890123456789012345678901234567890";
+        // 示例用法
+        std::string file_path;
+        std::string output_path;
         
-        try
+        if (argc >= 2)
         {
-            lt::add_torrent_params atp = lt::parse_magnet_uri(magnet_uri);
-            std::cout << "Magnet link parsed successfully" << std::endl;
-            if (atp.info_hashes.has_v1())
+            file_path = argv[1];
+            if (argc >= 3)
             {
-                std::cout << "Info Hash v1: " << atp.info_hashes.v1 << std::endl;
+                output_path = argv[2];
             }
-            if (atp.info_hashes.has_v2())
+            else
             {
-                std::cout << "Info Hash v2: " << atp.info_hashes.v2 << std::endl;
-            }
-        }
-        catch (const std::exception& e)
-        {
-            std::cout << "Magnet link parse failed (this is normal for example link): " << e.what() << std::endl;
-        }
-        std::cout << std::endl;
-
-        // Wait for a while to process alerts
-        std::cout << "Waiting 2 seconds to process alerts..." << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-
-        // Process alerts
-        std::vector<lt::alert*> alerts;
-        ses.pop_alerts(&alerts);
-        
-        if (!alerts.empty())
-        {
-            std::cout << "Received " << alerts.size() << " alerts" << std::endl;
-            for (auto* alert : alerts)
-            {
-                std::cout << "  - [" << alert->what() << "] " << alert->message() << std::endl;
+                // 如果没有指定输出路径，使用默认名称
+                std::filesystem::path p(file_path);
+                output_path = p.filename().string() + ".torrent";
             }
         }
         else
         {
-            std::cout << "No alerts received" << std::endl;
+            // 如果没有提供参数，使用示例路径
+            std::cout << "用法: " << argv[0] << " <文件或目录路径> [输出.torrent文件路径]" << std::endl;
+            std::cout << std::endl;
+            std::cout << "示例: " << argv[0] << " C:\\MyFiles\\example.txt example.torrent" << std::endl;
+            std::cout << std::endl;
+            
+            // 可以在这里设置默认的测试路径
+            // file_path = "test_file.txt";
+            // output_path = "test_file.torrent";
+            
+            std::cout << "请提供文件或目录路径作为参数" << std::endl;
+            return 1;
         }
+
+        // 创建 TorrentCreator 实例
+        TorrentCreator creator;
+        
+        // 配置 tracker 列表（可选）
+        std::vector<std::string> trackers = {
+            // 可以添加 tracker URL，例如:
+            // "udp://tracker.openbittorrent.com:80/announce",
+            // "udp://tracker.publicbt.com:80/announce",
+        };
+        creator.set_trackers(trackers);
+        
+        // 设置注释
+        creator.set_comment("由 DisklessWorkstation 创建");
+        
+        // 生成 torrent 文件
+        std::cout << "输入路径: " << file_path << std::endl;
+        std::cout << "输出路径: " << output_path << std::endl;
         std::cout << std::endl;
 
-        std::cout << "=== Example Completed ===" << std::endl;
-        std::cout << "LibTorrent is working correctly!" << std::endl;
-
-        return 0;
+        if (creator.create_torrent(file_path, output_path))
+        {
+            std::cout << std::endl;
+            std::cout << "=== Torrent 生成完成 ===" << std::endl;
+            return 0;
+        }
+        else
+        {
+            std::cout << std::endl;
+            std::cout << "=== Torrent 生成失败 ===" << std::endl;
+            return 1;
+        }
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "错误: " << e.what() << std::endl;
         return 1;
     }
 }
