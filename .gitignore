@@ -1,3 +1,6 @@
+# Build directory
+build/
+
 # Prerequisites
 *.d
 
@@ -39,3 +42,11 @@
 
 # debug information files
 *.dwo
+
+# Conan generated files (if not using -of build)
+*.cmake
+CMakePresets.json
+conan*.bat
+deactivate*.bat
+generators/
+
