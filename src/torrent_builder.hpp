@@ -13,26 +13,26 @@ class TorrentBuilder
 public:
     TorrentBuilder();
     
-    // 设置 tracker 列表
-    void set_trackers(const std::vector<std::string>& trackers);
-    
-    // 添加单个 tracker
-    void add_tracker(const std::string& tracker);
-    
-    // 设置注释
-    void set_comment(const std::string& comment);
-    
-    // 设置创建者
-    void set_creator(const std::string& creator);
-    
-    // 设置分片大小（字节），0 表示使用默认大小
-    void set_piece_size(int piece_size);
-    
     // 生成 torrent 文件
     bool create_torrent(const std::string& file_path, const std::string& output_path);
+
+    // 设置 tracker 列表
+    inline void set_trackers(const std::vector<std::string>& trackers) { trackers_ = trackers; }
+    
+    // 添加单个 tracker
+    inline void add_tracker(const std::string& tracker) { trackers_.push_back(tracker); }
+    
+    // 设置注释
+    inline void set_comment(const std::string& comment) { comment_ = comment; }
+    
+    // 设置创建者
+    inline void set_creator(const std::string& creator) { creator_ = creator; }
+    
+    // 设置分片大小（字节），0 表示使用默认大小
+    inline void set_piece_size(int piece_size) { piece_size_ = piece_size; }
     
     // 获取当前配置的 tracker 列表
-    const std::vector<std::string>& get_trackers() const;
+    inline const std::vector<std::string>& get_trackers() const { return trackers_; }
 
 private:
     // 验证路径是否存在

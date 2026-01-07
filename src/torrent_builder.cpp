@@ -14,31 +14,6 @@ TorrentBuilder::TorrentBuilder()
 {
 }
 
-void TorrentBuilder::set_trackers(const std::vector<std::string>& trackers)
-{
-    trackers_ = trackers;
-}
-
-void TorrentBuilder::add_tracker(const std::string& tracker)
-{
-    trackers_.push_back(tracker);
-}
-
-void TorrentBuilder::set_comment(const std::string& comment)
-{
-    comment_ = comment;
-}
-
-void TorrentBuilder::set_creator(const std::string& creator)
-{
-    creator_ = creator;
-}
-
-void TorrentBuilder::set_piece_size(int piece_size)
-{
-    piece_size_ = piece_size;
-}
-
 bool TorrentBuilder::create_torrent(const std::string& file_path, const std::string& output_path)
 {
     try
@@ -49,14 +24,17 @@ bool TorrentBuilder::create_torrent(const std::string& file_path, const std::str
             return false;
         }
 
+        // 确定根路径
+        std::string root_path = determine_root_path(file_path);
+
         // 创建文件存储对象
         lt::file_storage fs_storage;
         
-        // 确定根路径
-        std::string root_path = determine_root_path(file_path);
-        
         // 添加文件到存储
         add_files_to_storage(fs_storage, file_path);
+
+        // 自定义分片大小
+        // fs_storage.set_piece_length(piece_size_);
 
         // 创建 torrent 对象
         lt::create_torrent torrent(fs_storage);
@@ -177,11 +155,6 @@ lt::sha1_hash TorrentBuilder::extract_info_hash(const lt::entry& torrent_entry)
     }
     
     return info_hash_v1;
-}
-
-const std::vector<std::string>& TorrentBuilder::get_trackers() const
-{
-    return trackers_;
 }
 
 bool TorrentBuilder::write_torrent_file(const lt::entry& torrent_entry, const std::string& output_path)
