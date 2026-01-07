@@ -16,8 +16,7 @@ static std::string format_bytes(std::int64_t bytes)
     int unit_index = 0;
     double size = static_cast<double>(bytes);
     
-    while (size >= 1024.0 && unit_index < 4)
-    {
+    while (size >= 1024.0 && unit_index < 4) {
         size /= 1024.0;
         unit_index++;
     }
@@ -30,8 +29,7 @@ static std::string format_bytes(std::int64_t bytes)
 // 辅助函数：格式化速度
 static std::string format_speed(int rate_bytes_per_sec)
 {
-    if (rate_bytes_per_sec == 0)
-    {
+    if (rate_bytes_per_sec == 0) {
         return "0 B/s";
     }
     
@@ -52,8 +50,7 @@ Seeder::~Seeder()
 
 void Seeder::configure_session()
 {
-    try
-    {
+    try {
         // 创建 session 配置
         lt::settings_pack settings;
         settings.set_int(lt::settings_pack::alert_mask, 
@@ -78,9 +75,7 @@ void Seeder::configure_session()
         session_ = std::make_unique<lt::session>(settings);
         
         std::cout << "Seeder 会话已初始化" << std::endl;
-    }
-    catch (const std::exception& e)
-    {
+    } catch (const std::exception& e) {
         std::cerr << "初始化 Seeder 会话失败: " << e.what() << std::endl;
         throw;
     }
@@ -91,15 +86,13 @@ bool Seeder::validate_paths(const std::string& torrent_path, const std::string& 
     namespace fs = std::filesystem;
     
     // 验证 torrent 文件是否存在
-    if (!fs::exists(torrent_path))
-    {
+    if (!fs::exists(torrent_path)) {
         std::cerr << "错误: Torrent 文件不存在: " << torrent_path << std::endl;
         return false;
     }
     
     // 验证保存路径是否存在
-    if (!fs::exists(save_path))
-    {
+    if (!fs::exists(save_path)) {
         std::cerr << "错误: 保存路径不存在: " << save_path << std::endl;
         std::cerr << "提示: 保存路径必须指向创建 torrent 时的原始文件或目录" << std::endl;
         return false;
@@ -110,24 +103,20 @@ bool Seeder::validate_paths(const std::string& torrent_path, const std::string& 
 
 bool Seeder::start_seeding(const std::string& torrent_path, const std::string& save_path)
 {
-    try
-    {
+    try {
         // 如果已经在做种，先停止
-        if (is_seeding_)
-        {
+        if (is_seeding_) {
             stop_seeding();
         }
         
         // 验证路径
-        if (!validate_paths(torrent_path, save_path))
-        {
+        if (!validate_paths(torrent_path, save_path)) {
             return false;
         }
         
         // 加载 torrent 文件
         std::ifstream torrent_file(torrent_path, std::ios::binary);
-        if (!torrent_file.is_open())
-        {
+        if (!torrent_file.is_open()) {
             std::cerr << "错误: 无法打开 torrent 文件: " << torrent_path << std::endl;
             return false;
         }
@@ -151,8 +140,7 @@ bool Seeder::start_seeding(const std::string& torrent_path, const std::string& s
         // 添加 torrent 到 session
         torrent_handle_ = session_->add_torrent(params, ec);
         
-        if (ec)
-        {
+        if (ec) {
             std::cerr << "错误: 添加 torrent 失败: " << ec.message() << std::endl;
             return false;
         }
@@ -171,9 +159,7 @@ bool Seeder::start_seeding(const std::string& torrent_path, const std::string& s
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         
         return true;
-    }
-    catch (const std::exception& e)
-    {
+    } catch (const std::exception& e) {
         std::cerr << "开始做种时出错: " << e.what() << std::endl;
         is_seeding_ = false;
         return false;
@@ -182,15 +168,12 @@ bool Seeder::start_seeding(const std::string& torrent_path, const std::string& s
 
 void Seeder::stop_seeding()
 {
-    if (!is_seeding_ || !session_)
-    {
+    if (!is_seeding_ || !session_) {
         return;
     }
     
-    try
-    {
-        if (torrent_handle_.is_valid())
-        {
+    try {
+        if (torrent_handle_.is_valid()) {
             // 从 session 中移除 torrent
             session_->remove_torrent(torrent_handle_, lt::session::delete_files);
             torrent_handle_ = lt::torrent_handle();
@@ -198,9 +181,7 @@ void Seeder::stop_seeding()
         
         is_seeding_ = false;
         std::cout << "已停止做种" << std::endl;
-    }
-    catch (const std::exception& e)
-    {
+    } catch (const std::exception& e) {
         std::cerr << "停止做种时出错: " << e.what() << std::endl;
     }
 }
@@ -212,37 +193,26 @@ bool Seeder::is_seeding() const
 
 void Seeder::print_status() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid())
-    {
+    if (!is_seeding_ || !torrent_handle_.is_valid()) {
         std::cout << "当前未在做种" << std::endl;
         return;
     }
     
-    try
-    {
+    try {
         lt::torrent_status status = torrent_handle_.status();
         
         std::cout << "=== 做种状态 ===" << std::endl;
         std::cout << "状态: ";
         
-        if (status.state == lt::torrent_status::seeding)
-        {
+        if (status.state == lt::torrent_status::seeding) {
             std::cout << "做种中 (Seeding)" << std::endl;
-        }
-        else if (status.state == lt::torrent_status::finished)
-        {
+        } else if (status.state == lt::torrent_status::finished) {
             std::cout << "已完成 (Finished)" << std::endl;
-        }
-        else if (status.state == lt::torrent_status::downloading)
-        {
+        } else if (status.state == lt::torrent_status::downloading) {
             std::cout << "下载中 (Downloading)" << std::endl;
-        }
-        else if (status.state == lt::torrent_status::checking_files)
-        {
+        } else if (status.state == lt::torrent_status::checking_files) {
             std::cout << "检查文件中 (Checking Files)" << std::endl;
-        }
-        else
-        {
+        } else {
             std::cout << "其他状态 (" << static_cast<int>(status.state) << ")" << std::endl;
         }
         
@@ -254,18 +224,13 @@ void Seeder::print_status() const
         
         // 显示 tracker 状态
         std::vector<lt::announce_entry> trackers = torrent_handle_.trackers();
-        if (!trackers.empty())
-        {
+        if (!trackers.empty()) {
             std::cout << "Tracker 状态:" << std::endl;
-            for (const auto& tracker : trackers)
-            {
+            for (const auto& tracker : trackers) {
                 std::cout << "  - " << tracker.url;
-                if (tracker.is_working())
-                {
+                if (tracker.is_working()) {
                     std::cout << " [工作正常]";
-                }
-                else
-                {
+                } else {
                     std::cout << " [未连接]";
                 }
                 std::cout << std::endl;
@@ -273,43 +238,33 @@ void Seeder::print_status() const
         }
         
         std::cout << std::endl;
-    }
-    catch (const std::exception& e)
-    {
+    } catch (const std::exception& e) {
         std::cerr << "获取状态时出错: " << e.what() << std::endl;
     }
 }
 
 bool Seeder::wait_and_process(int timeout_ms)
 {
-    if (!session_)
-    {
+    if (!session_) {
         return false;
     }
     
-    try
-    {
+    try {
         // 处理 alerts
         std::vector<lt::alert*> alerts;
         session_->pop_alerts(&alerts);
         
-        for (lt::alert* alert : alerts)
-        {
-            // 处理 tracker 相关警报
-            if (lt::alert_cast<lt::tracker_announce_alert>(alert))
-            {
+        for (lt::alert* alert : alerts) {
+            if (lt::alert_cast<lt::tracker_announce_alert>(alert)) {
+                // 处理 tracker 相关警报
                 auto* ta = lt::alert_cast<lt::tracker_announce_alert>(alert);
-                if (ta)
-                {
+                if (ta) {
                     std::cout << "Tracker 公告: " << ta->tracker_url() << std::endl;
                 }
-            }
-            // 处理错误警报
-            else if (lt::alert_cast<lt::torrent_error_alert>(alert))
-            {
+            } else if (lt::alert_cast<lt::torrent_error_alert>(alert)) {
+                // 处理错误警报
                 auto* tea = lt::alert_cast<lt::torrent_error_alert>(alert);
-                if (tea)
-                {
+                if (tea) {
                     std::cerr << "Torrent 错误: " << tea->error.message() << std::endl;
                 }
             }
@@ -319,9 +274,7 @@ bool Seeder::wait_and_process(int timeout_ms)
         std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
         
         return is_seeding_;
-    }
-    catch (const std::exception& e)
-    {
+    } catch (const std::exception& e) {
         std::cerr << "处理事件时出错: " << e.what() << std::endl;
         return false;
     }
@@ -329,55 +282,42 @@ bool Seeder::wait_and_process(int timeout_ms)
 
 int Seeder::get_peer_count() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid())
-    {
+    if (!is_seeding_ || !torrent_handle_.is_valid()) {
         return 0;
     }
     
-    try
-    {
+    try {
         lt::torrent_status status = torrent_handle_.status();
         return status.num_peers;
-    }
-    catch (const std::exception&)
-    {
+    } catch (const std::exception&) {
         return 0;
     }
 }
 
 std::int64_t Seeder::get_uploaded_bytes() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid())
-    {
+    if (!is_seeding_ || !torrent_handle_.is_valid()) {
         return 0;
     }
     
-    try
-    {
+    try {
         lt::torrent_status status = torrent_handle_.status();
         return status.total_upload;
-    }
-    catch (const std::exception&)
-    {
+    } catch (const std::exception&) {
         return 0;
     }
 }
 
 std::int64_t Seeder::get_downloaded_bytes() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid())
-    {
+    if (!is_seeding_ || !torrent_handle_.is_valid()) {
         return 0;
     }
     
-    try
-    {
+    try {
         lt::torrent_status status = torrent_handle_.status();
         return status.total_download;
-    }
-    catch (const std::exception&)
-    {
+    } catch (const std::exception&) {
         return 0;
     }
 }
-
