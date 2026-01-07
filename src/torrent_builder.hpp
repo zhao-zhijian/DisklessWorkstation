@@ -1,5 +1,5 @@
-#ifndef TORRENT_CREATOR_HPP
-#define TORRENT_CREATOR_HPP
+#ifndef TORRENT_BUILDER_HPP
+#define TORRENT_BUILDER_HPP
 
 #include <string>
 #include <vector>
@@ -8,10 +8,10 @@
 #include <libtorrent/sha1_hash.hpp>
 
 // Torrent 种子生成器类
-class TorrentCreator
+class TorrentBuilder
 {
 public:
-    TorrentCreator();
+    TorrentBuilder();
     
     // 设置 tracker 列表
     void set_trackers(const std::vector<std::string>& trackers);
@@ -30,6 +30,9 @@ public:
     
     // 生成 torrent 文件
     bool create_torrent(const std::string& file_path, const std::string& output_path);
+    
+    // 获取当前配置的 tracker 列表
+    const std::vector<std::string>& get_trackers() const;
 
 private:
     // 验证路径是否存在
@@ -54,5 +57,5 @@ private:
     int piece_size_;                     // 分片大小（0 表示使用默认）
 };
 
-#endif // TORRENT_CREATOR_HPP
+#endif // TORRENT_BUILDER_HPP
 

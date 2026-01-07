@@ -1,4 +1,4 @@
-#include "torrent_creator.hpp"
+#include "torrent_builder.hpp"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -8,38 +8,38 @@
 #include <libtorrent/hasher.hpp>
 #include <libtorrent/sha1_hash.hpp>
 
-TorrentCreator::TorrentCreator()
+TorrentBuilder::TorrentBuilder()
     : creator_("DisklessWorkstation")
     , piece_size_(0)  // 0 表示使用默认大小
 {
 }
 
-void TorrentCreator::set_trackers(const std::vector<std::string>& trackers)
+void TorrentBuilder::set_trackers(const std::vector<std::string>& trackers)
 {
     trackers_ = trackers;
 }
 
-void TorrentCreator::add_tracker(const std::string& tracker)
+void TorrentBuilder::add_tracker(const std::string& tracker)
 {
     trackers_.push_back(tracker);
 }
 
-void TorrentCreator::set_comment(const std::string& comment)
+void TorrentBuilder::set_comment(const std::string& comment)
 {
     comment_ = comment;
 }
 
-void TorrentCreator::set_creator(const std::string& creator)
+void TorrentBuilder::set_creator(const std::string& creator)
 {
     creator_ = creator;
 }
 
-void TorrentCreator::set_piece_size(int piece_size)
+void TorrentBuilder::set_piece_size(int piece_size)
 {
     piece_size_ = piece_size;
 }
 
-bool TorrentCreator::create_torrent(const std::string& file_path, const std::string& output_path)
+bool TorrentBuilder::create_torrent(const std::string& file_path, const std::string& output_path)
 {
     try
     {
@@ -102,6 +102,25 @@ bool TorrentCreator::create_torrent(const std::string& file_path, const std::str
             std::cout << "Info Hash v1: " << info_hash_v1 << std::endl;
         }
         
+        // 显示 tracker 信息
+        if (!trackers_.empty())
+        {
+            std::cout << "已添加 " << trackers_.size() << " 个 Tracker:" << std::endl;
+            for (size_t i = 0; i < trackers_.size(); ++i)
+            {
+                std::cout << "  [" << (i + 1) << "] " << trackers_[i] << std::endl;
+            }
+            std::cout << std::endl;
+            std::cout << "提示: Tracker URL 已写入 torrent 文件。" << std::endl;
+            std::cout << "      使用 BitTorrent 客户端打开 torrent 文件并开始做种后，" << std::endl;
+            std::cout << "      客户端会自动向这些 Tracker 报告，Tracker 会记录你的做种信息。" << std::endl;
+        }
+        else
+        {
+            std::cout << "警告: 未添加任何 Tracker。" << std::endl;
+            std::cout << "      建议添加 Tracker URL 以便其他用户能够发现你的做种。" << std::endl;
+        }
+        
         return true;
     }
     catch (const std::exception& e)
@@ -111,7 +130,7 @@ bool TorrentCreator::create_torrent(const std::string& file_path, const std::str
     }
 }
 
-bool TorrentCreator::validate_path(const std::string& file_path)
+bool TorrentBuilder::validate_path(const std::string& file_path)
 {
     namespace fs = std::filesystem;
     
@@ -123,7 +142,7 @@ bool TorrentCreator::validate_path(const std::string& file_path)
     return true;
 }
 
-std::string TorrentCreator::determine_root_path(const std::string& file_path)
+std::string TorrentBuilder::determine_root_path(const std::string& file_path)
 {
     namespace fs = std::filesystem;
     
@@ -135,12 +154,12 @@ std::string TorrentCreator::determine_root_path(const std::string& file_path)
     return root_path;
 }
 
-void TorrentCreator::add_files_to_storage(lt::file_storage& fs_storage, const std::string& file_path)
+void TorrentBuilder::add_files_to_storage(lt::file_storage& fs_storage, const std::string& file_path)
 {
     lt::add_files(fs_storage, file_path, [](std::string const&) { return true; });
 }
 
-lt::sha1_hash TorrentCreator::extract_info_hash(const lt::entry& torrent_entry)
+lt::sha1_hash TorrentBuilder::extract_info_hash(const lt::entry& torrent_entry)
 {
     lt::sha1_hash info_hash_v1;
     
@@ -160,7 +179,12 @@ lt::sha1_hash TorrentCreator::extract_info_hash(const lt::entry& torrent_entry)
     return info_hash_v1;
 }
 
-bool TorrentCreator::write_torrent_file(const lt::entry& torrent_entry, const std::string& output_path)
+const std::vector<std::string>& TorrentBuilder::get_trackers() const
+{
+    return trackers_;
+}
+
+bool TorrentBuilder::write_torrent_file(const lt::entry& torrent_entry, const std::string& output_path)
 {
     // 编码为 bencode 格式
     std::vector<char> torrent_data;

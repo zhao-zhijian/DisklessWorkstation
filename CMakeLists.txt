@@ -35,7 +35,8 @@ find_package(Boost REQUIRED)
 # 添加可执行文件
 add_executable(${PROJECT_NAME}
     src/main.cpp
-    src/torrent_creator.cpp
+    src/torrent_builder.cpp
+    src/seeder.cpp
 )
 
 # 添加 Windows 定义

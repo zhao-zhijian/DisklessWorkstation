@@ -79,9 +79,51 @@ DisklessWorkstation/
 ├── conanfile.py              # Conan 配置文件
 ├── conan_profiles/           # Conan 编译器配置
 │   └── msvc-vs2022          # MSVC VS2022 配置
+├── src/                      # 源代码目录
+│   ├── main.cpp             # 主程序
+│   ├── torrent_builder.hpp  # TorrentBuilder 类头文件
+│   ├── torrent_builder.cpp  # TorrentBuilder 类实现
+│   ├── seeder.hpp           # Seeder 类头文件
+│   └── seeder.cpp           # Seeder 类实现
+├── docs/                     # 文档目录
+│   ├── TRACKER_EXPLANATION.md  # Tracker 说明文档
+│   └── SEEDER_USAGE.md         # Seeder 类使用说明
 ├── build/                    # 构建输出目录（由 Conan 生成）
 └── README.md                 # 本文件
 ```
+
+## 功能特性
+
+### TorrentBuilder 类
+- 创建 BitTorrent torrent 文件
+- 支持添加多个 tracker
+- 支持设置注释和创建者信息
+- 自动计算文件哈希值
+
+### Seeder 类
+- 自动开始做种
+- 自动向 tracker 报告
+- 实时显示做种状态
+- 支持 DHT、UPnP、NAT-PMP 等网络功能
+
+## 使用说明
+
+### 基本用法
+
+```bash
+# 创建 torrent 文件并开始做种
+DisklessWorkstation.exe C:\MyFiles\example.txt example.torrent
+```
+
+程序会：
+1. 创建 torrent 文件
+2. 询问是否开始做种
+3. 如果选择是，自动启动做种并向 tracker 报告
+
+### 详细文档
+
+- [Tracker 说明文档](docs/TRACKER_EXPLANATION.md) - 了解 tracker 的工作原理和使用方法
+- [Seeder 类使用说明](docs/SEEDER_USAGE.md) - Seeder 类的详细 API 说明和使用示例
 
 ## 依赖说明
 

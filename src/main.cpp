@@ -1,10 +1,12 @@
 #include <iostream>
 #include <filesystem>
+#include <string>
 #ifdef _WIN32
 #include <windows.h>
 #endif
 #include <libtorrent/version.hpp>
-#include "torrent_creator.hpp"
+#include "torrent_builder.hpp"
+#include "seeder.hpp"
 
 int main(int argc, char* argv[])
 {
@@ -54,29 +56,95 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        // 创建 TorrentCreator 实例
-        TorrentCreator creator;
+        // 创建 TorrentBuilder 实例
+        TorrentBuilder builder;
         
         // 配置 tracker 列表（可选）
+        // 注意：添加 tracker URL 只是将其写入 torrent 文件
+        // 真正的"上传"到 tracker 需要：
+        // 1. 使用 BitTorrent 客户端打开 torrent 文件
+        // 2. 开始做种（Seeding）
+        // 3. 客户端会自动向 tracker 发送 announce 请求，tracker 会记录你的做种信息
         std::vector<std::string> trackers = {
-            // 可以添加 tracker URL，例如:
-            // "udp://tracker.openbittorrent.com:80/announce",
-            // "udp://tracker.publicbt.com:80/announce",
+            // 公共 tracker 示例（可以取消注释使用）:
+            "udp://tracker.openbittorrent.com:80/announce",
+            "udp://tracker.publicbt.com:80/announce",
+            "udp://tracker.istole.it:80/announce",
+            "http://tracker.bt-chat.com/announce",
+            "http://172.16.1.63:6880/announce",
         };
-        creator.set_trackers(trackers);
+        builder.set_trackers(trackers);
         
         // 设置注释
-        creator.set_comment("由 DisklessWorkstation 创建");
+        builder.set_comment("由 DisklessWorkstation 创建");
         
         // 生成 torrent 文件
         std::cout << "输入路径: " << file_path << std::endl;
         std::cout << "输出路径: " << output_path << std::endl;
         std::cout << std::endl;
 
-        if (creator.create_torrent(file_path, output_path))
+        if (builder.create_torrent(file_path, output_path))
         {
             std::cout << std::endl;
             std::cout << "=== Torrent 生成完成 ===" << std::endl;
+            std::cout << std::endl;
+            
+            // 询问是否开始做种
+            std::cout << "是否开始做种？(y/n): ";
+            std::string answer;
+            std::getline(std::cin, answer);
+            
+            if (answer == "y" || answer == "Y" || answer == "yes" || answer == "YES")
+            {
+                std::cout << std::endl;
+                std::cout << "=== 开始做种 ===" << std::endl;
+                
+                // 确定保存路径（原始文件/目录的路径）
+                std::filesystem::path file_path_obj(file_path);
+                std::string save_path = file_path_obj.parent_path().string();
+                if (save_path.empty())
+                {
+                    save_path = ".";
+                }
+                
+                // 创建 Seeder 实例并开始做种
+                Seeder seeder;
+                if (seeder.start_seeding(output_path, save_path))
+                {
+                    std::cout << std::endl;
+                    std::cout << "做种已启动，按 Ctrl+C 停止做种" << std::endl;
+                    std::cout << std::endl;
+                    
+                    // 主循环：保持做种状态并定期显示状态
+                    int status_counter = 0;
+                    while (seeder.is_seeding())
+                    {
+                        // 处理事件
+                        seeder.wait_and_process(1000);
+                        
+                        // 每 10 秒显示一次状态
+                        status_counter++;
+                        if (status_counter >= 10)
+                        {
+                            seeder.print_status();
+                            status_counter = 0;
+                        }
+                    }
+                    
+                    std::cout << "做种已停止" << std::endl;
+                }
+                else
+                {
+                    std::cerr << "启动做种失败" << std::endl;
+                    return 1;
+                }
+            }
+            else
+            {
+                std::cout << "跳过做种步骤" << std::endl;
+                std::cout << "提示: 你可以稍后使用 BitTorrent 客户端打开 torrent 文件开始做种" << std::endl;
+            }
+            
             return 0;
         }
         else
