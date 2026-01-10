@@ -84,10 +84,13 @@ DisklessWorkstation/
 │   ├── torrent_builder.hpp  # TorrentBuilder 类头文件
 │   ├── torrent_builder.cpp  # TorrentBuilder 类实现
 │   ├── seeder.hpp           # Seeder 类头文件
-│   └── seeder.cpp           # Seeder 类实现
+│   ├── seeder.cpp           # Seeder 类实现
+│   ├── downloader.hpp       # Downloader 类头文件
+│   └── downloader.cpp       # Downloader 类实现
 ├── docs/                     # 文档目录
 │   ├── TRACKER_EXPLANATION.md  # Tracker 说明文档
-│   └── SEEDER_USAGE.md         # Seeder 类使用说明
+│   ├── SEEDER_USAGE.md         # Seeder 类使用说明
+│   └── DOWNLOADER_USAGE.md     # Downloader 类使用说明
 ├── build/                    # 构建输出目录（由 Conan 生成）
 └── README.md                 # 本文件
 ```
@@ -104,6 +107,13 @@ DisklessWorkstation/
 - 自动开始做种
 - 自动向 tracker 报告
 - 实时显示做种状态
+- 支持 DHT、UPnP、NAT-PMP 等网络功能
+
+### Downloader 类
+- 从 torrent 文件自动下载
+- 实时显示下载进度和速度
+- 支持暂停/恢复下载
+- 自动处理下载完成事件
 - 支持 DHT、UPnP、NAT-PMP 等网络功能
 
 ## 使用说明
@@ -124,6 +134,7 @@ DisklessWorkstation.exe C:\MyFiles\example.txt example.torrent
 
 - [Tracker 说明文档](docs/TRACKER_EXPLANATION.md) - 了解 tracker 的工作原理和使用方法
 - [Seeder 类使用说明](docs/SEEDER_USAGE.md) - Seeder 类的详细 API 说明和使用示例
+- [Downloader 类使用说明](docs/DOWNLOADER_USAGE.md) - Downloader 类的详细 API 说明和使用示例
 
 ## 依赖说明
 

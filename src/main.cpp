@@ -65,6 +65,8 @@ int main(int argc, char* argv[])
             "udp://tracker.istole.it:80/announce",
             "http://tracker.bt-chat.com/announce",
             "http://172.16.1.63:6880/announce",
+            "http://124.71.64.241:6969/announce",
+            "http://124.71.64.241:6880/announce",
         };
         builder.set_trackers(trackers);
         
@@ -90,11 +92,23 @@ int main(int argc, char* argv[])
                 std::cout << std::endl;
                 std::cout << "=== 开始做种 ===" << std::endl;
                 
-                // 确定保存路径（原始文件/目录的路径）
+                // 确定保存路径（原始文件/目录的根路径）
+                // 这个路径应该与创建 torrent 时使用的根路径一致
                 std::filesystem::path file_path_obj(file_path);
-                std::string save_path = file_path_obj.parent_path().string();
-                if (save_path.empty()) {
-                    save_path = ".";
+                std::string save_path;
+                
+                if (std::filesystem::is_directory(file_path)) {
+                    // 如果是目录，使用目录的父目录作为 save_path
+                    save_path = file_path_obj.parent_path().string();
+                    if (save_path.empty()) {
+                        save_path = ".";
+                    }
+                } else {
+                    // 如果是文件，使用文件的父目录作为 save_path
+                    save_path = file_path_obj.parent_path().string();
+                    if (save_path.empty()) {
+                        save_path = ".";
+                    }
                 }
                 
                 // 创建 Seeder 实例并开始做种

@@ -28,7 +28,7 @@ public:
     // 设置创建者
     inline void set_creator(const std::string& creator) { creator_ = creator; }
     
-    // 设置分片大小（字节），0 表示使用默认大小
+    // 设置分片大小（字节），0 表示使用默认大小或自动选择
     inline void set_piece_size(int piece_size) { piece_size_ = piece_size; }
     
     // 获取当前配置的 tracker 列表
@@ -54,7 +54,7 @@ private:
     std::vector<std::string> trackers_;  // tracker 列表
     std::string comment_;                // 注释
     std::string creator_;                 // 创建者
-    int piece_size_;                     // 分片大小（0 表示使用默认）
+    int piece_size_;                     // 分片大小（0 表示使用默认或自动选择）
 };
 
 #endif // TORRENT_BUILDER_HPP
