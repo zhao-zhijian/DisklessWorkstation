@@ -102,12 +102,14 @@ DisklessWorkstation/
 - 支持添加多个 tracker
 - 支持设置注释和创建者信息
 - 自动计算文件哈希值
+- **大文件优化**：自动为大文件（>4GB）设置合适的分片大小（16MB）
 
 ### Seeder 类
 - 自动开始做种
 - 自动向 tracker 报告
 - 实时显示做种状态
 - 支持 DHT、UPnP、NAT-PMP 等网络功能
+- **大文件优化**：对于大文件（>50GB）使用快速模式，跳过文件验证以快速启动做种
 
 ### Downloader 类
 - 从 torrent 文件自动下载
@@ -115,10 +117,15 @@ DisklessWorkstation/
 - 支持暂停/恢复下载
 - 自动处理下载完成事件
 - 支持 DHT、UPnP、NAT-PMP 等网络功能
+- **大文件下载优化**：针对大文件（>50GB）自动优化配置，包括更大的磁盘缓存、更多连接数等
 
 ## 使用说明
 
 ### 基本用法
+
+项目支持三种运行模式：
+
+#### 1. 生成 Torrent 文件模式（默认）
 
 ```bash
 # 创建 torrent 文件并开始做种
@@ -129,6 +136,55 @@ DisklessWorkstation.exe C:\MyFiles\example.txt example.torrent
 1. 创建 torrent 文件
 2. 询问是否开始做种
 3. 如果选择是，自动启动做种并向 tracker 报告
+
+#### 2. 直接做种模式
+
+```bash
+# 使用已有的 torrent 文件开始做种
+DisklessWorkstation.exe -s example.torrent C:\MyFiles
+```
+
+**参数说明：**
+- `-s, --seed`: 直接做种模式（跳过生成 torrent 文件）
+- `torrent文件路径`: 已有的 .torrent 文件路径
+- `保存路径`: 原始文件/目录的保存路径（必须与创建 torrent 时的路径一致）
+
+#### 3. 下载模式
+
+```bash
+# 从 torrent 文件下载
+DisklessWorkstation.exe -d example.torrent C:\Downloads
+```
+
+**参数说明：**
+- `-d, --download`: 下载模式
+- `torrent文件路径`: 要下载的 .torrent 文件路径
+- `保存路径`: 下载文件的保存目录（如果不存在会自动创建）
+
+**大文件下载优化：**
+- 自动检测大文件（>50GB）并应用优化配置
+- 使用更大的磁盘缓存（512MB）提高性能
+- 设置更多连接数以加快下载速度
+- 自动监控并恢复被暂停的下载
+
+### 使用示例
+
+```bash
+# 生成 torrent 文件
+DisklessWorkstation.exe C:\MyFiles\example.txt example.torrent
+
+# 直接做种（使用已有 torrent 文件）
+DisklessWorkstation.exe -s example.torrent C:\MyFiles
+
+# 下载文件
+DisklessWorkstation.exe -d example.torrent C:\Downloads
+
+# 大文件目录生成 torrent（自动优化）
+DisklessWorkstation.exe D:\LargeDirectory\ D:\torrents\large.torrent
+
+# 大文件目录下载（自动优化）
+DisklessWorkstation.exe -d D:\torrents\large.torrent D:\Downloads
+```
 
 ### 详细文档
 
