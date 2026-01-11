@@ -17,11 +17,71 @@ int main(int argc, char* argv[])
 #endif
 
     try {
-        std::cout << "=== LibTorrent Torrent 生成器 ===" << std::endl;
+        std::cout << "=== LibTorrent Torrent 工具 ===" << std::endl;
         std::cout << "LibTorrent Version: " << LIBTORRENT_VERSION << std::endl;
         std::cout << std::endl;
 
-        // 示例用法
+        // 检查是否是直接做种模式（-s 或 --seed）
+        bool direct_seed_mode = false;
+        if (argc >= 2) {
+            std::string first_arg = argv[1];
+            if (first_arg == "-s" || first_arg == "--seed") {
+                direct_seed_mode = true;
+            }
+        }
+        
+        if (direct_seed_mode) {
+            // 直接做种模式：使用已有的 torrent 文件
+            if (argc < 4) {
+                std::cout << "用法（直接做种）: " << argv[0] << " -s <torrent文件路径> <保存路径>" << std::endl;
+                std::cout << std::endl;
+                std::cout << "示例: " << argv[0] << " -s example.torrent C:\\MyFiles" << std::endl;
+                std::cout << std::endl;
+                std::cout << "说明: " << std::endl;
+                std::cout << "  -s, --seed    : 直接做种模式（跳过生成 torrent 文件）" << std::endl;
+                std::cout << "  torrent文件路径: 已有的 .torrent 文件路径" << std::endl;
+                std::cout << "  保存路径        : 原始文件/目录的保存路径（必须与创建 torrent 时的路径一致）" << std::endl;
+                return 1;
+            }
+            
+            std::string torrent_path = argv[2];
+            std::string save_path = argv[3];
+            
+            std::cout << "=== 直接做种模式 ===" << std::endl;
+            std::cout << "Torrent 文件: " << torrent_path << std::endl;
+            std::cout << "保存路径: " << save_path << std::endl;
+            std::cout << std::endl;
+            
+            // 创建 Seeder 实例并开始做种
+            Seeder seeder;
+            if (seeder.start_seeding(torrent_path, save_path)) {
+                std::cout << std::endl;
+                std::cout << "做种已启动，按 Ctrl+C 停止做种" << std::endl;
+                std::cout << std::endl;
+                
+                // 主循环：保持做种状态并定期显示状态
+                int status_counter = 0;
+                while (seeder.is_seeding()) {
+                    // 处理事件
+                    seeder.wait_and_process(1000);
+                    
+                    // 每 10 秒显示一次状态
+                    status_counter++;
+                    if (status_counter >= 10) {
+                        seeder.print_status();
+                        status_counter = 0;
+                    }
+                }
+                
+                std::cout << "做种已停止" << std::endl;
+                return 0;
+            } else {
+                std::cerr << "启动做种失败" << std::endl;
+                return 1;
+            }
+        }
+        
+        // 原有模式：生成 torrent 文件
         std::string file_path;
         std::string output_path;
         
@@ -35,21 +95,22 @@ int main(int argc, char* argv[])
                 output_path = p.filename().string() + ".torrent";
             }
         } else {
-            // 如果没有提供参数，使用示例路径
-            std::cout << "用法: " << argv[0] << " <文件或目录路径> [输出.torrent文件路径]" << std::endl;
+            // 如果没有提供参数，显示用法
+            std::cout << "用法（生成 torrent）: " << argv[0] << " <文件或目录路径> [输出.torrent文件路径]" << std::endl;
             std::cout << std::endl;
-            std::cout << "示例: " << argv[0] << " C:\\MyFiles\\example.txt example.torrent" << std::endl;
+            std::cout << "用法（直接做种）: " << argv[0] << " -s <torrent文件路径> <保存路径>" << std::endl;
             std::cout << std::endl;
-            
-            // 可以在这里设置默认的测试路径
-            // file_path = "test_file.txt";
-            // output_path = "test_file.torrent";
+            std::cout << "示例:" << std::endl;
+            std::cout << "  生成 torrent: " << argv[0] << " C:\\MyFiles\\example.txt example.torrent" << std::endl;
+            std::cout << "  直接做种    : " << argv[0] << " -s example.torrent C:\\MyFiles" << std::endl;
+            std::cout << std::endl;
             
             std::cout << "请提供文件或目录路径作为参数" << std::endl;
             return 1;
         }
 
-        // 创建 TorrentBuilder 实例
+        // 创建 TorrentBuilder 实例（生成 torrent 模式）
+        std::cout << "=== Torrent 生成模式 ===" << std::endl;
         TorrentBuilder builder;
         
         // 配置 tracker 列表（可选）
@@ -60,10 +121,10 @@ int main(int argc, char* argv[])
         // 3. 客户端会自动向 tracker 发送 announce 请求，tracker 会记录你的做种信息
         std::vector<std::string> trackers = {
             // 公共 tracker 示例（可以取消注释使用）:
-            "udp://tracker.openbittorrent.com:80/announce",
-            "udp://tracker.publicbt.com:80/announce",
-            "udp://tracker.istole.it:80/announce",
-            "http://tracker.bt-chat.com/announce",
+            // "udp://tracker.openbittorrent.com:80/announce",
+            // "udp://tracker.publicbt.com:80/announce",
+            // "udp://tracker.istole.it:80/announce",
+            // "http://tracker.bt-chat.com/announce",
             "http://172.16.1.63:6880/announce",
             "http://124.71.64.241:6969/announce",
             "http://124.71.64.241:6880/announce",
