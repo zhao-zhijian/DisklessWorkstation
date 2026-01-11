@@ -7,6 +7,7 @@
 #include <libtorrent/version.hpp>
 #include "torrent_builder.hpp"
 #include "seeder.hpp"
+#include "downloader.hpp"
 
 int main(int argc, char* argv[])
 {
@@ -21,15 +22,78 @@ int main(int argc, char* argv[])
         std::cout << "LibTorrent Version: " << LIBTORRENT_VERSION << std::endl;
         std::cout << std::endl;
 
-        // 检查是否是直接做种模式（-s 或 --seed）
+        // 检查运行模式
         bool direct_seed_mode = false;
+        bool download_mode = false;
         if (argc >= 2) {
             std::string first_arg = argv[1];
             if (first_arg == "-s" || first_arg == "--seed") {
                 direct_seed_mode = true;
+            } else if (first_arg == "-d" || first_arg == "--download") {
+                download_mode = true;
             }
         }
         
+        // 下载模式
+        if (download_mode) {
+            // 下载模式：从 torrent 文件下载
+            if (argc < 4) {
+                std::cout << "用法（下载）: " << argv[0] << " -d <torrent文件路径> <保存路径>" << std::endl;
+                std::cout << std::endl;
+                std::cout << "示例: " << argv[0] << " -d example.torrent C:\\Downloads" << std::endl;
+                std::cout << std::endl;
+                std::cout << "说明: " << std::endl;
+                std::cout << "  -d, --download : 下载模式" << std::endl;
+                std::cout << "  torrent文件路径: 要下载的 .torrent 文件路径" << std::endl;
+                std::cout << "  保存路径        : 下载文件的保存目录" << std::endl;
+                return 1;
+            }
+            
+            std::string torrent_path = argv[2];
+            std::string save_path = argv[3];
+            
+            std::cout << "=== 下载模式 ===" << std::endl;
+            std::cout << "Torrent 文件: " << torrent_path << std::endl;
+            std::cout << "保存路径: " << save_path << std::endl;
+            std::cout << std::endl;
+            
+            // 创建 Downloader 实例并开始下载
+            Downloader downloader;
+            if (downloader.start_download(torrent_path, save_path)) {
+                std::cout << std::endl;
+                std::cout << "下载已启动，按 Ctrl+C 停止下载" << std::endl;
+                std::cout << std::endl;
+                
+                // 主循环：保持下载状态并定期显示状态
+                int status_counter = 0;
+                while (downloader.is_downloading() && !downloader.is_finished()) {
+                    // 处理事件
+                    downloader.wait_and_process(1000);
+                    
+                    // 每 10 秒显示一次状态
+                    status_counter++;
+                    if (status_counter >= 10) {
+                        downloader.print_status();
+                        status_counter = 0;
+                    }
+                }
+                
+                // 检查是否完成
+                if (downloader.is_finished()) {
+                    std::cout << std::endl;
+                    std::cout << "=== 下载完成！===" << std::endl;
+                    downloader.print_status();
+                } else {
+                    std::cout << "下载已停止" << std::endl;
+                }
+                return 0;
+            } else {
+                std::cerr << "启动下载失败" << std::endl;
+                return 1;
+            }
+        }
+        
+        // 直接做种模式
         if (direct_seed_mode) {
             // 直接做种模式：使用已有的 torrent 文件
             if (argc < 4) {
@@ -100,9 +164,12 @@ int main(int argc, char* argv[])
             std::cout << std::endl;
             std::cout << "用法（直接做种）: " << argv[0] << " -s <torrent文件路径> <保存路径>" << std::endl;
             std::cout << std::endl;
+            std::cout << "用法（下载）    : " << argv[0] << " -d <torrent文件路径> <保存路径>" << std::endl;
+            std::cout << std::endl;
             std::cout << "示例:" << std::endl;
             std::cout << "  生成 torrent: " << argv[0] << " C:\\MyFiles\\example.txt example.torrent" << std::endl;
             std::cout << "  直接做种    : " << argv[0] << " -s example.torrent C:\\MyFiles" << std::endl;
+            std::cout << "  下载        : " << argv[0] << " -d example.torrent C:\\Downloads" << std::endl;
             std::cout << std::endl;
             
             std::cout << "请提供文件或目录路径作为参数" << std::endl;

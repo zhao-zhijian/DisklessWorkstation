@@ -84,13 +84,27 @@ void Downloader::configure_session()
         settings.set_int(lt::settings_pack::download_rate_limit, 0);
         settings.set_int(lt::settings_pack::upload_rate_limit, 0);
         
-        // 设置最大连接数
+        // 设置最大连接数（大文件需要更多连接）
         settings.set_int(lt::settings_pack::connections_limit, 200);
+        
+        // 设置磁盘缓存大小（大文件需要更大的缓存）
+        // 默认是32MB，对于大文件增加到512MB以提高性能
+        settings.set_int(lt::settings_pack::cache_size, 512);
+        
+        // 设置磁盘缓存过期时间（毫秒），大文件需要更长的缓存时间
+        settings.set_int(lt::settings_pack::cache_expiry, 300);
+        
+        // 设置磁盘写入队列大小（大文件需要更大的队列）
+        settings.set_int(lt::settings_pack::max_queued_disk_bytes, 1024 * 1024 * 1024); // 1GB
+        
+        // 注意：max_connections_per_torrent 不是 settings_pack 的成员
+        // 每个 torrent 的最大连接数需要通过 torrent_handle.set_max_connections() 设置
+        // 这将在 start_download() 中完成
         
         // 创建 session
         session_ = std::make_unique<lt::session>(settings);
         
-        std::cout << "Downloader 会话已初始化" << std::endl;
+        std::cout << "Downloader 会话已初始化（已优化大文件下载配置）" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "初始化 Downloader 会话失败: " << e.what() << std::endl;
         throw;
@@ -145,15 +159,41 @@ bool Downloader::start_download(const std::string& torrent_path, const std::stri
             return false;
         }
         
-        // 解析 torrent 文件
+        // 解析 torrent 文件，先获取 torrent_info 以检查文件大小
         lt::error_code ec;
-        lt::add_torrent_params params = lt::load_torrent_file(torrent_path);
+        lt::torrent_info ti(torrent_path, ec);
+        if (ec) {
+            std::cerr << "错误: 解析 torrent 文件失败: " << ec.message() << std::endl;
+            return false;
+        }
         
-        // 设置保存路径
+        // 获取 torrent 文件大小
+        std::int64_t torrent_size = ti.total_size();
+        
+        // 创建 add_torrent_params
+        lt::add_torrent_params params;
+        params.ti = std::make_shared<lt::torrent_info>(ti);
         params.save_path = save_path;
         
-        // 设置下载模式（自动管理）
-        params.flags |= lt::torrent_flags::auto_managed;
+        // 针对大文件的优化设置
+        const std::int64_t large_file_threshold = 50LL * 1024 * 1024 * 1024; // 50GB
+        
+        if (torrent_size > large_file_threshold) {
+            std::cout << "检测到大文件（总大小: " 
+                      << format_bytes(torrent_size) 
+                      << "），应用大文件下载优化..." << std::endl;
+            
+            // 对于大文件，不使用 auto_managed，手动控制下载
+            // 这样可以避免在检查文件时被自动暂停
+            // 注意：不使用 auto_managed 意味着需要手动管理下载状态
+            params.flags &= ~lt::torrent_flags::auto_managed;
+            params.flags &= ~lt::torrent_flags::paused;  // 确保不是暂停状态
+            
+            std::cout << "使用手动下载模式（跳过自动管理）..." << std::endl;
+        } else {
+            // 小文件使用标准设置（自动管理）
+            params.flags |= lt::torrent_flags::auto_managed;
+        }
         
         // 添加 torrent 到 session
         torrent_handle_ = session_->add_torrent(params, ec);
@@ -163,14 +203,41 @@ bool Downloader::start_download(const std::string& torrent_path, const std::stri
             return false;
         }
         
-        // 设置下载优先级
+        // 设置下载优先级（非上传模式）
         torrent_handle_.set_upload_mode(false);
+        
+        // 对于大文件，设置更高的下载优先级和更多连接
+        if (torrent_size > large_file_threshold) {
+            // 设置每个 torrent 的最大连接数（大文件需要更多连接）
+            torrent_handle_.set_max_connections(200);
+            
+            // 设置所有文件为最高优先级
+            std::vector<int> priorities;
+            for (int i = 0; i < ti.num_files(); ++i) {
+                priorities.push_back(7); // 最高优先级
+            }
+            torrent_handle_.prioritize_files(priorities);
+            
+            // 强制开始下载（大文件需要手动控制）
+            // resume() 会自动取消暂停状态
+            torrent_handle_.resume();
+            
+            std::cout << "已强制开始下载..." << std::endl;
+        } else {
+            // 小文件也设置合理的连接数
+            torrent_handle_.set_max_connections(50);
+        }
+        
+        // 确保下载已开始（无论文件大小）
+        // 再次调用 resume 确保下载已启动
+        torrent_handle_.resume();
         
         is_downloading_ = true;
         
         std::cout << "开始下载..." << std::endl;
         std::cout << "Torrent 文件: " << torrent_path << std::endl;
         std::cout << "保存路径: " << save_path << std::endl;
+        std::cout << "文件大小: " << format_bytes(torrent_size) << std::endl;
         std::cout << std::endl;
         
         // 等待 torrent 状态更新
@@ -353,6 +420,35 @@ bool Downloader::wait_and_process(int timeout_ms)
                 if (fea) {
                     std::cerr << "文件错误: " << fea->error.message() << std::endl;
                 }
+            } else if (lt::alert_cast<lt::state_changed_alert>(alert)) {
+                // 处理状态变化警报
+                auto* sca = lt::alert_cast<lt::state_changed_alert>(alert);
+                if (sca && torrent_handle_.is_valid()) {
+                    // 如果从 checking_files 状态转换到其他状态，确保下载已开始
+                    if (sca->state == lt::torrent_status::downloading || 
+                        sca->state == lt::torrent_status::finished) {
+                        // 确保下载没有被暂停（resume 会自动取消暂停）
+                        torrent_handle_.resume();
+                    }
+                }
+            }
+        }
+        
+        // 对于大文件，定期检查并确保下载没有被暂停
+        if (torrent_handle_.is_valid()) {
+            try {
+                lt::torrent_status status = torrent_handle_.status();
+                
+                // 如果处于 checking_files 状态，等待检查完成
+                // 如果检查完成但处于暂停状态，强制恢复
+                if (status.state != lt::torrent_status::checking_files &&
+                    status.state != lt::torrent_status::checking_resume_data &&
+                    (status.flags & lt::torrent_flags::paused)) {
+                    // 如果下载被暂停了，强制恢复（resume 会自动取消暂停状态）
+                    torrent_handle_.resume();
+                }
+            } catch (...) {
+                // 忽略状态检查错误
             }
         }
         
