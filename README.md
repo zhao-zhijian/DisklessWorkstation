@@ -108,6 +108,7 @@ DisklessWorkstation/
 - 自动开始做种
 - 自动向 tracker 报告
 - 实时显示做种状态
+- **支持多torrent同时做种**：可在同一个session中同时管理多个torrent
 - 支持 DHT、UPnP、NAT-PMP 等网络功能
 - **大文件优化**：对于大文件（>50GB）使用快速模式，跳过文件验证以快速启动做种
 
@@ -123,7 +124,7 @@ DisklessWorkstation/
 
 ### 基本用法
 
-项目支持三种运行模式：
+项目支持四种运行模式：
 
 #### 1. 生成 Torrent 文件模式（默认）
 
@@ -149,7 +150,24 @@ DisklessWorkstation.exe -s example.torrent C:\MyFiles
 - `torrent文件路径`: 已有的 .torrent 文件路径
 - `保存路径`: 原始文件/目录的保存路径（必须与创建 torrent 时的路径一致）
 
-#### 3. 下载模式
+#### 3. 多Torrent同时做种模式
+
+```bash
+# 同时做多个torrent
+DisklessWorkstation.exe -m torrent1.torrent C:\Files1 torrent2.torrent C:\Files2 torrent3.torrent C:\Files3
+```
+
+**参数说明：**
+- `-m, --multi-seed`: 多torrent同时做种模式
+- 参数必须是成对出现：`<torrent文件路径> <保存路径>`
+- 可以同时做多个torrent，所有torrent在同一个session中并发做种
+
+**特点：**
+- 所有torrent共享同一个libtorrent session，资源占用更高效
+- 实时显示所有torrent的总体状态（总peer数、总上传/下载量等）
+- 支持同时管理多个torrent的做种任务
+
+#### 4. 下载模式
 
 ```bash
 # 从 torrent 文件下载
@@ -175,6 +193,9 @@ DisklessWorkstation.exe C:\MyFiles\example.txt example.torrent
 
 # 直接做种（使用已有 torrent 文件）
 DisklessWorkstation.exe -s example.torrent C:\MyFiles
+
+# 多torrent同时做种
+DisklessWorkstation.exe -m torrent1.torrent C:\Files1 torrent2.torrent C:\Files2
 
 # 下载文件
 DisklessWorkstation.exe -d example.torrent C:\Downloads

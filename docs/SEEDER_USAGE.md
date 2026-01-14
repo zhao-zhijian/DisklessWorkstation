@@ -7,10 +7,11 @@
 ## 主要功能
 
 1. **自动做种**：从 torrent 文件启动做种，自动向 tracker 报告
-2. **状态监控**：实时显示做种状态、连接数、上传/下载速度等信息
-3. **Tracker 管理**：自动处理与 tracker 的通信，显示 tracker 连接状态
-4. **事件处理**：处理做种过程中的各种事件和错误
-5. **大文件优化**：针对大文件（>50GB）自动应用优化配置，包括快速模式启动、更大的磁盘缓存等
+2. **多torrent支持**：支持在同一个session中同时管理多个torrent的做种任务
+3. **状态监控**：实时显示做种状态、连接数、上传/下载速度等信息
+4. **Tracker 管理**：自动处理与 tracker 的通信，显示 tracker 连接状态
+5. **事件处理**：处理做种过程中的各种事件和错误
+6. **大文件优化**：针对大文件（>50GB）自动应用优化配置，包括快速模式启动、更大的磁盘缓存等
 
 ## 类接口说明
 
@@ -90,10 +91,14 @@ if (seeder.is_seeding())
 seeder.print_status();
 ```
 
-**输出示例：**
+**输出示例（单个torrent）：**
 ```
-=== 做种状态 ===
+=== 当前做种任务数: 1 ===
+
+--- Torrent #1 状态 ---
 状态: 做种中 (Seeding)
+进度: 100.00%
+已下载/需要: 1.00 GB / 1.00 GB
 连接的对等节点数: 5
 已上传: 125.50 MB
 已下载: 0.00 B
@@ -102,6 +107,47 @@ seeder.print_status();
 Tracker 状态:
   - udp://tracker.openbittorrent.com:80/announce [工作正常]
   - http://172.16.1.63:6880/announce [工作正常]
+```
+
+**输出示例（多个torrent）：**
+```
+=== 当前做种任务数: 3 ===
+
+--- Torrent #1 状态 ---
+状态: 做种中 (Seeding)
+进度: 100.00%
+已下载/需要: 1.00 GB / 1.00 GB
+连接的对等节点数: 3
+已上传: 125.50 MB
+已下载: 0.00 B
+上传速度: 1.25 MB/s
+下载速度: 0.00 B/s
+Tracker 状态:
+  - http://172.16.1.63:6880/announce [工作正常]
+
+--- Torrent #2 状态 ---
+状态: 做种中 (Seeding)
+进度: 100.00%
+已下载/需要: 500.00 MB / 500.00 MB
+连接的对等节点数: 2
+已上传: 50.25 MB
+已下载: 0.00 B
+上传速度: 512.00 KB/s
+下载速度: 0.00 B/s
+Tracker 状态:
+  - http://172.16.1.63:6880/announce [工作正常]
+
+--- Torrent #3 状态 ---
+状态: 检查文件中 (Checking Files)
+进度: 45.32%
+已下载/需要: 226.60 MB / 500.00 MB
+连接的对等节点数: 0
+已上传: 0.00 B
+已下载: 0.00 B
+上传速度: 0.00 B/s
+下载速度: 0.00 B/s
+Tracker 状态:
+  - http://172.16.1.63:6880/announce [未连接]
 ```
 
 #### `bool wait_and_process(int timeout_ms = 1000)`
@@ -147,6 +193,18 @@ while (seeder.is_seeding())
 
 **返回值：**
 - 已下载的字节数，如果未在做种则返回 0
+
+#### `size_t get_torrent_count() const`
+
+获取当前管理的 torrent 数量。
+
+**返回值：**
+- 当前正在做种的 torrent 数量
+
+**说明：**
+- 支持同时管理多个torrent
+- 每次调用 `start_seeding()` 都会添加一个新的torrent到管理列表
+- 所有torrent共享同一个libtorrent session
 
 ## 使用示例
 
@@ -196,10 +254,71 @@ int main()
 }
 ```
 
+### 多Torrent同时做种
+
+```cpp
+#include "seeder.hpp"
+#include <iostream>
+
+int main()
+{
+    Seeder seeder;
+    
+    // 添加第一个torrent
+    if (seeder.start_seeding("torrent1.torrent", "C:\\Files1"))
+    {
+        std::cout << "Torrent 1 已添加" << std::endl;
+    }
+    
+    // 添加第二个torrent（共享同一个session）
+    if (seeder.start_seeding("torrent2.torrent", "C:\\Files2"))
+    {
+        std::cout << "Torrent 2 已添加" << std::endl;
+    }
+    
+    // 添加第三个torrent
+    if (seeder.start_seeding("torrent3.torrent", "C:\\Files3"))
+    {
+        std::cout << "Torrent 3 已添加" << std::endl;
+    }
+    
+    std::cout << "当前做种数量: " << seeder.get_torrent_count() << std::endl;
+    
+    // 主循环：保持做种状态
+    int status_counter = 0;
+    while (seeder.is_seeding())
+    {
+        seeder.wait_and_process(1000);
+        
+        // 每 10 秒显示一次状态
+        status_counter++;
+        if (status_counter >= 10)
+        {
+            std::cout << std::endl;
+            std::cout << "=== 当前状态（每10秒更新） ===" << std::endl;
+            seeder.print_status();
+            std::cout << "总Peer数: " << seeder.get_peer_count() << std::endl;
+            std::cout << "总上传: " << format_bytes(seeder.get_uploaded_bytes()) << std::endl;
+            std::cout << "总下载: " << format_bytes(seeder.get_downloaded_bytes()) << std::endl;
+            std::cout << std::endl;
+            status_counter = 0;
+        }
+    }
+    
+    return 0;
+}
+```
+
+**特点：**
+- 所有torrent共享同一个libtorrent session，资源占用更高效
+- 可以随时添加新的torrent（调用 `start_seeding()`）
+- `print_status()` 会显示所有torrent的详细状态
+- `get_peer_count()`、`get_uploaded_bytes()` 等方法返回所有torrent的累计值
+
 ### 与 TorrentBuilder 配合使用
 
 ```cpp
-#include "torrent_creator.hpp"
+#include "torrent_builder.hpp"
 #include "seeder.hpp"
 #include <iostream>
 
@@ -290,7 +409,23 @@ Seeder 类自动配置了以下网络功能：
 - Seeder 使用 RAII 模式，析构时自动清理资源
 - 建议使用智能指针或栈对象，避免手动管理内存
 
-### 6. 大文件做种优化
+### 6. 多Torrent管理
+
+Seeder 类支持在同一个session中同时管理多个torrent：
+
+**特点：**
+- 所有torrent共享同一个libtorrent session，资源占用更高效
+- 可以随时添加新的torrent（多次调用 `start_seeding()`）
+- `print_status()` 会显示所有torrent的详细状态
+- `get_peer_count()`、`get_uploaded_bytes()` 等方法返回所有torrent的累计值
+- `get_torrent_count()` 返回当前管理的torrent数量
+
+**使用场景：**
+- 需要同时做多个torrent时
+- 需要统一管理多个做种任务时
+- 需要节省资源（共享session）时
+
+### 7. 大文件做种优化
 
 Seeder 类针对大文件（>50GB）自动应用以下优化：
 
@@ -374,9 +509,15 @@ if (seeder.start_seeding("large_file.torrent", "C:\\MyFiles"))
 ### 内部实现
 
 Seeder 类内部使用：
-- `lt::session`：libtorrent 会话，管理所有 torrent 任务
-- `lt::torrent_handle`：单个 torrent 任务的句柄
+- `lt::session`：libtorrent 会话，管理所有 torrent 任务（所有torrent共享同一个session）
+- `std::vector<lt::torrent_handle>`：管理所有torrent任务的句柄列表
 - `lt::add_torrent_params`：添加 torrent 时的参数
+
+**多torrent管理：**
+- 使用 `std::vector<lt::torrent_handle>` 存储所有torrent句柄
+- 每次调用 `start_seeding()` 都会添加一个新的torrent句柄到列表
+- `is_seeding()` 检查所有torrent句柄，只要有一个有效即返回true
+- `wait_and_process()` 会自动清理无效的torrent句柄
 
 ### Session 配置
 
