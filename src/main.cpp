@@ -8,6 +8,24 @@
 #include "torrent_builder.hpp"
 #include "seeder.hpp"
 #include "downloader.hpp"
+#include <cstdio>
+
+// 辅助函数：格式化字节数
+static std::string format_bytes(std::int64_t bytes)
+{
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int unit_index = 0;
+    double size = static_cast<double>(bytes);
+    
+    while (size >= 1024.0 && unit_index < 4) {
+        size /= 1024.0;
+        unit_index++;
+    }
+    
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%.2f %s", size, units[unit_index]);
+    return std::string(buffer);
+}
 
 int main(int argc, char* argv[])
 {
@@ -25,12 +43,15 @@ int main(int argc, char* argv[])
         // 检查运行模式
         bool direct_seed_mode = false;
         bool download_mode = false;
+        bool multi_seed_mode = false;
         if (argc >= 2) {
             std::string first_arg = argv[1];
             if (first_arg == "-s" || first_arg == "--seed") {
                 direct_seed_mode = true;
             } else if (first_arg == "-d" || first_arg == "--download") {
                 download_mode = true;
+            } else if (first_arg == "-m" || first_arg == "--multi-seed") {
+                multi_seed_mode = true;
             }
         }
         
@@ -89,6 +110,87 @@ int main(int argc, char* argv[])
                 return 0;
             } else {
                 std::cerr << "启动下载失败" << std::endl;
+                return 1;
+            }
+        }
+        
+        // 多torrent同时做种模式
+        if (multi_seed_mode) {
+            // 多torrent做种模式：同时做多个torrent
+            if (argc < 4 || (argc - 2) % 2 != 0) {
+                std::cout << "用法（多torrent做种）: " << argv[0] << " -m <torrent1> <保存路径1> [torrent2] [保存路径2] ..." << std::endl;
+                std::cout << std::endl;
+                std::cout << "示例: " << argv[0] << " -m torrent1.torrent C:\\Files1 torrent2.torrent C:\\Files2 torrent3.torrent C:\\Files3" << std::endl;
+                std::cout << std::endl;
+                std::cout << "说明: " << std::endl;
+                std::cout << "  -m, --multi-seed : 多torrent同时做种模式" << std::endl;
+                std::cout << "  参数必须是成对出现: <torrent文件路径> <保存路径>" << std::endl;
+                std::cout << "  可以同时做多个torrent，所有torrent在同一个session中并发做种" << std::endl;
+                return 1;
+            }
+            
+            std::cout << "=== 多Torrent同时做种模式 ===" << std::endl;
+            std::cout << "将同时做种 " << (argc - 2) / 2 << " 个torrent" << std::endl;
+            std::cout << std::endl;
+            
+            // 创建 Seeder 实例（所有torrent共享同一个session）
+            Seeder seeder;
+            int success_count = 0;
+            int fail_count = 0;
+            
+            // 解析参数对：每两个参数为一对（torrent路径, 保存路径）
+            for (int i = 2; i < argc; i += 2) {
+                std::string torrent_path = argv[i];
+                std::string save_path = argv[i + 1];
+                
+                std::cout << "--- 添加 Torrent #" << (i / 2) << " ---" << std::endl;
+                std::cout << "Torrent 文件: " << torrent_path << std::endl;
+                std::cout << "保存路径: " << save_path << std::endl;
+                
+                if (seeder.start_seeding(torrent_path, save_path)) {
+                    success_count++;
+                    std::cout << "✓ 成功添加" << std::endl;
+                } else {
+                    fail_count++;
+                    std::cerr << "✗ 添加失败" << std::endl;
+                }
+                std::cout << std::endl;
+            }
+            
+            std::cout << "=== 添加完成 ===" << std::endl;
+            std::cout << "成功: " << success_count << " 个" << std::endl;
+            std::cout << "失败: " << fail_count << " 个" << std::endl;
+            std::cout << "当前做种数量: " << seeder.get_torrent_count() << " 个" << std::endl;
+            std::cout << std::endl;
+            
+            if (success_count > 0) {
+                std::cout << "所有torrent已启动，按 Ctrl+C 停止做种" << std::endl;
+                std::cout << std::endl;
+                
+                // 主循环：保持做种状态并定期显示状态
+                int status_counter = 0;
+                while (seeder.is_seeding()) {
+                    // 处理事件
+                    seeder.wait_and_process(1000);
+                    
+                    // 每 10 秒显示一次状态
+                    status_counter++;
+                    if (status_counter >= 10) {
+                        std::cout << std::endl;
+                        std::cout << "=== 当前状态（每10秒更新） ===" << std::endl;
+                        seeder.print_status();
+                        std::cout << "总Peer数: " << seeder.get_peer_count() << std::endl;
+                        std::cout << "总上传: " << format_bytes(seeder.get_uploaded_bytes()) << std::endl;
+                        std::cout << "总下载: " << format_bytes(seeder.get_downloaded_bytes()) << std::endl;
+                        std::cout << std::endl;
+                        status_counter = 0;
+                    }
+                }
+                
+                std::cout << "所有做种已停止" << std::endl;
+                return 0;
+            } else {
+                std::cerr << "没有成功启动任何做种任务" << std::endl;
                 return 1;
             }
         }
@@ -164,11 +266,14 @@ int main(int argc, char* argv[])
             std::cout << std::endl;
             std::cout << "用法（直接做种）: " << argv[0] << " -s <torrent文件路径> <保存路径>" << std::endl;
             std::cout << std::endl;
+            std::cout << "用法（多torrent做种）: " << argv[0] << " -m <torrent1> <保存路径1> [torrent2] [保存路径2] ..." << std::endl;
+            std::cout << std::endl;
             std::cout << "用法（下载）    : " << argv[0] << " -d <torrent文件路径> <保存路径>" << std::endl;
             std::cout << std::endl;
             std::cout << "示例:" << std::endl;
             std::cout << "  生成 torrent: " << argv[0] << " C:\\MyFiles\\example.txt example.torrent" << std::endl;
             std::cout << "  直接做种    : " << argv[0] << " -s example.torrent C:\\MyFiles" << std::endl;
+            std::cout << "  多torrent做种: " << argv[0] << " -m torrent1.torrent C:\\Files1 torrent2.torrent C:\\Files2" << std::endl;
             std::cout << "  下载        : " << argv[0] << " -d example.torrent C:\\Downloads" << std::endl;
             std::cout << std::endl;
             
