@@ -3,6 +3,7 @@
 
 #include <string>
 #include <memory>
+#include <vector>
 #include <libtorrent/session.hpp>
 #include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/add_torrent_params.hpp>
@@ -44,6 +45,9 @@ public:
     
     // 获取下载的字节数（通常做种时为0）
     std::int64_t get_downloaded_bytes() const;
+    
+    // 获取当前管理的 torrent 数量
+    size_t get_torrent_count() const;
 
 private:
     // 初始化 session 设置
@@ -53,9 +57,9 @@ private:
     bool validate_paths(const std::string& torrent_path, const std::string& save_path);
 
 private:
-    std::unique_ptr<lt::session> session_;      // libtorrent 会话
-    lt::torrent_handle torrent_handle_;          // torrent 句柄
-    bool is_seeding_;                            // 是否正在做种
+    std::unique_ptr<lt::session> session_;              // libtorrent 会话
+    std::vector<lt::torrent_handle> torrent_handles_;    // 管理的所有 torrent 句柄
+    bool is_seeding_;                                    // 是否有任意 torrent 正在做种
 };
 
 #endif // SEEDER_HPP

@@ -9,6 +9,7 @@
 #include <thread>
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 
 // 辅助函数：格式化字节数
 static std::string format_bytes(std::int64_t bytes)
@@ -64,7 +65,7 @@ void Seeder::configure_session()
         settings.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:0");
         
         // 启用 DHT
-        settings.set_bool(lt::settings_pack::enable_dht, true);
+        settings.set_bool(lt::settings_pack::enable_dht, false);
         
         // 启用本地服务发现
         settings.set_bool(lt::settings_pack::enable_lsd, true);
@@ -120,10 +121,7 @@ bool Seeder::validate_paths(const std::string& torrent_path, const std::string& 
 bool Seeder::start_seeding(const std::string& torrent_path, const std::string& save_path)
 {
     try {
-        // 如果已经在做种，先停止
-        if (is_seeding_) {
-            stop_seeding();
-        }
+        // 不再强制停止已有做种，允许同时做多个种
         
         // 验证路径
         if (!validate_paths(torrent_path, save_path)) {
@@ -231,20 +229,27 @@ bool Seeder::start_seeding(const std::string& torrent_path, const std::string& s
             params.flags |= lt::torrent_flags::auto_managed;
         }
         
+        // 确保做种时不被暂停
+        params.flags &= ~lt::torrent_flags::paused;
+        
         // 添加 torrent 到 session
-        torrent_handle_ = session_->add_torrent(params, ec);
+        lt::torrent_handle th = session_->add_torrent(params, ec);
         
         if (ec) {
             std::cerr << "错误: 添加 torrent 失败: " << ec.message() << std::endl;
             return false;
         }
         
-        // 设置优先级为最高（做种模式）
-        torrent_handle_.set_upload_mode(false);
+        // 对于做种，不需要设置 upload_mode
+        // upload_mode 主要用于下载时控制是否允许上传
+        // 做种时 torrent 会自动允许上传
+        
+        // 记录该 torrent 句柄
+        torrent_handles_.push_back(th);
         
         is_seeding_ = true;
         
-        std::cout << "开始做种..." << std::endl;
+        std::cout << "开始做种 [" << torrent_handles_.size() << " 个 torrent 正在做种]..." << std::endl;
         std::cout << "Torrent 文件: " << torrent_path << std::endl;
         std::cout << "保存路径: " << save_path << std::endl;
         std::cout << "Torrent 大小: " << format_bytes(torrent_size) << std::endl;
@@ -256,26 +261,29 @@ bool Seeder::start_seeding(const std::string& torrent_path, const std::string& s
         return true;
     } catch (const std::exception& e) {
         std::cerr << "开始做种时出错: " << e.what() << std::endl;
-        is_seeding_ = false;
+        is_seeding_ = !torrent_handles_.empty();
         return false;
     }
 }
 
 void Seeder::stop_seeding()
 {
-    if (!is_seeding_ || !session_) {
+    if (!session_) {
         return;
     }
     
     try {
-        if (torrent_handle_.is_valid()) {
-            // 从 session 中移除 torrent
-            session_->remove_torrent(torrent_handle_, lt::session::delete_files);
-            torrent_handle_ = lt::torrent_handle();
+        // 逐个从 session 中移除所有 torrent
+        for (auto& th : torrent_handles_) {
+            if (th.is_valid()) {
+                session_->remove_torrent(th, lt::session::delete_files);
+            }
         }
         
+        torrent_handles_.clear();
+        
         is_seeding_ = false;
-        std::cout << "已停止做种" << std::endl;
+        std::cout << "已停止所有做种" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "停止做种时出错: " << e.what() << std::endl;
     }
@@ -283,68 +291,89 @@ void Seeder::stop_seeding()
 
 bool Seeder::is_seeding() const
 {
-    return is_seeding_ && torrent_handle_.is_valid();
+    // 只要存在一个有效的 torrent，即认为在做种
+    if (!is_seeding_) return false;
+    
+    for (const auto& th : torrent_handles_) {
+        if (th.is_valid()) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 void Seeder::print_status() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid()) {
+    if (torrent_handles_.empty()) {
         std::cout << "当前未在做种" << std::endl;
         return;
     }
     
-    try {
-        lt::torrent_status status = torrent_handle_.status();
-        
-        std::cout << "=== 做种状态 ===" << std::endl;
-        std::cout << "状态: ";
-        
-        if (status.state == lt::torrent_status::seeding) {
-            std::cout << "做种中 (Seeding)" << std::endl;
-        } else if (status.state == lt::torrent_status::finished) {
-            std::cout << "已完成 (Finished)" << std::endl;
-        } else if (status.state == lt::torrent_status::downloading) {
-            std::cout << "下载中 (Downloading)" << std::endl;
-        } else if (status.state == lt::torrent_status::checking_files) {
-            std::cout << "检查文件中 (Checking Files)" << std::endl;
-        } else {
-            std::cout << "其他状态 (" << static_cast<int>(status.state) << ")" << std::endl;
+    std::cout << "=== 当前做种任务数: " << torrent_handles_.size() << " ===" << std::endl;
+    std::cout << std::endl;
+    
+    int index = 0;
+    for (const auto& th : torrent_handles_) {
+        ++index;
+        if (!th.is_valid()) {
+            std::cout << "[Torrent #" << index << "] 句柄无效" << std::endl;
+            continue;
         }
         
-        // 计算进度（用于文件验证和下载）
-        double progress = 0.0;
-        if (status.total_wanted > 0) {
-            progress = static_cast<double>(status.total_wanted_done) / 
-                      static_cast<double>(status.total_wanted);
-        }
-        
-        std::cout << "进度: " << (progress * 100.0) << "%" << std::endl;
-        std::cout << "已下载/需要: " << format_bytes(status.total_wanted_done) 
-                  << " / " << format_bytes(status.total_wanted) << std::endl;
-        std::cout << "连接的对等节点数: " << status.num_peers << std::endl;
-        std::cout << "已上传: " << format_bytes(status.total_upload) << std::endl;
-        std::cout << "已下载: " << format_bytes(status.total_download) << std::endl;
-        std::cout << "上传速度: " << format_speed(status.upload_rate) << std::endl;
-        std::cout << "下载速度: " << format_speed(status.download_rate) << std::endl;
-        
-        // 显示 tracker 状态
-        std::vector<lt::announce_entry> trackers = torrent_handle_.trackers();
-        if (!trackers.empty()) {
-            std::cout << "Tracker 状态:" << std::endl;
-            for (const auto& tracker : trackers) {
-                std::cout << "  - " << tracker.url;
-                if (tracker.is_working()) {
-                    std::cout << " [工作正常]";
-                } else {
-                    std::cout << " [未连接]";
-                }
-                std::cout << std::endl;
+        try {
+            lt::torrent_status status = th.status();
+            
+            std::cout << "--- Torrent #" << index << " 状态 ---" << std::endl;
+            std::cout << "状态: ";
+            
+            if (status.state == lt::torrent_status::seeding) {
+                std::cout << "做种中 (Seeding)" << std::endl;
+            } else if (status.state == lt::torrent_status::finished) {
+                std::cout << "已完成 (Finished)" << std::endl;
+            } else if (status.state == lt::torrent_status::downloading) {
+                std::cout << "下载中 (Downloading)" << std::endl;
+            } else if (status.state == lt::torrent_status::checking_files) {
+                std::cout << "检查文件中 (Checking Files)" << std::endl;
+            } else {
+                std::cout << "其他状态 (" << static_cast<int>(status.state) << ")" << std::endl;
             }
+            
+            // 计算进度（用于文件验证和下载）
+            double progress = 0.0;
+            if (status.total_wanted > 0) {
+                progress = static_cast<double>(status.total_wanted_done) / 
+                          static_cast<double>(status.total_wanted);
+            }
+            
+            std::cout << "进度: " << (progress * 100.0) << "%" << std::endl;
+            std::cout << "已下载/需要: " << format_bytes(status.total_wanted_done) 
+                      << " / " << format_bytes(status.total_wanted) << std::endl;
+            std::cout << "连接的对等节点数: " << status.num_peers << std::endl;
+            std::cout << "已上传: " << format_bytes(status.total_upload) << std::endl;
+            std::cout << "已下载: " << format_bytes(status.total_download) << std::endl;
+            std::cout << "上传速度: " << format_speed(status.upload_rate) << std::endl;
+            std::cout << "下载速度: " << format_speed(status.download_rate) << std::endl;
+            
+            // 显示 tracker 状态
+            std::vector<lt::announce_entry> trackers = th.trackers();
+            if (!trackers.empty()) {
+                std::cout << "Tracker 状态:" << std::endl;
+                for (const auto& tracker : trackers) {
+                    std::cout << "  - " << tracker.url;
+                    if (tracker.is_working()) {
+                        std::cout << " [工作正常]";
+                    } else {
+                        std::cout << " [未连接]";
+                    }
+                    std::cout << std::endl;
+                }
+            }
+            
+            std::cout << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[Torrent #" << index << "] 获取状态时出错: " << e.what() << std::endl;
         }
-        
-        std::cout << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "获取状态时出错: " << e.what() << std::endl;
     }
 }
 
@@ -422,6 +451,16 @@ bool Seeder::wait_and_process(int timeout_ms)
         // 等待指定时间
         std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
         
+        // 清理无效的 torrent 句柄
+        torrent_handles_.erase(
+            std::remove_if(torrent_handles_.begin(), torrent_handles_.end(),
+                [](const lt::torrent_handle& th) { return !th.is_valid(); }),
+            torrent_handles_.end()
+        );
+        
+        // 更新 is_seeding_ 状态
+        is_seeding_ = !torrent_handles_.empty();
+        
         return is_seeding_;
     } catch (const std::exception& e) {
         std::cerr << "处理事件时出错: " << e.what() << std::endl;
@@ -431,42 +470,71 @@ bool Seeder::wait_and_process(int timeout_ms)
 
 int Seeder::get_peer_count() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid()) {
+    if (torrent_handles_.empty()) {
         return 0;
     }
     
-    try {
-        lt::torrent_status status = torrent_handle_.status();
-        return status.num_peers;
-    } catch (const std::exception&) {
-        return 0;
+    int total_peers = 0;
+    
+    for (const auto& th : torrent_handles_) {
+        if (!th.is_valid()) continue;
+        
+        try {
+            lt::torrent_status status = th.status();
+            total_peers += status.num_peers;
+        } catch (const std::exception&) {
+            // 忽略单个 torrent 的错误，继续统计其他
+        }
     }
+    
+    return total_peers;
 }
 
 std::int64_t Seeder::get_uploaded_bytes() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid()) {
+    if (torrent_handles_.empty()) {
         return 0;
     }
     
-    try {
-        lt::torrent_status status = torrent_handle_.status();
-        return status.total_upload;
-    } catch (const std::exception&) {
-        return 0;
+    std::int64_t total_upload = 0;
+    
+    for (const auto& th : torrent_handles_) {
+        if (!th.is_valid()) continue;
+        
+        try {
+            lt::torrent_status status = th.status();
+            total_upload += status.total_upload;
+        } catch (const std::exception&) {
+            // 忽略单个 torrent 的错误
+        }
     }
+    
+    return total_upload;
 }
 
 std::int64_t Seeder::get_downloaded_bytes() const
 {
-    if (!is_seeding_ || !torrent_handle_.is_valid()) {
+    if (torrent_handles_.empty()) {
         return 0;
     }
     
-    try {
-        lt::torrent_status status = torrent_handle_.status();
-        return status.total_download;
-    } catch (const std::exception&) {
-        return 0;
+    std::int64_t total_download = 0;
+    
+    for (const auto& th : torrent_handles_) {
+        if (!th.is_valid()) continue;
+        
+        try {
+            lt::torrent_status status = th.status();
+            total_download += status.total_download;
+        } catch (const std::exception&) {
+            // 忽略单个 torrent 的错误
+        }
     }
+    
+    return total_download;
+}
+
+size_t Seeder::get_torrent_count() const
+{
+    return torrent_handles_.size();
 }
