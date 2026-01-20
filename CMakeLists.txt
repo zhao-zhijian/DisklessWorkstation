@@ -38,6 +38,7 @@ add_executable(${PROJECT_NAME}
     src/torrent_builder.cpp
     src/seeder.cpp
     src/downloader.cpp
+    src/torrent_manager.cpp
 )
 
 # 添加 Windows 定义
