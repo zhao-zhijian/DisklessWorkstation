@@ -147,6 +147,16 @@ public:
     
     // 打印指定 torrent 的状态
     void print_torrent_status(const std::string& info_hash) const;
+    
+    // 手动添加 peer（当 Tracker 不可用时使用）
+    // info_hash: torrent 的 info_hash
+    // ip: peer 的 IP 地址
+    // port: peer 的端口（默认 6881）
+    // 返回: 是否成功添加
+    bool add_peer(const std::string& info_hash, const std::string& ip, int port = 6881);
+    
+    // 打印网络/会话状态（用于诊断）
+    void print_session_status() const;
 
 private:
     // 私有构造函数（单例模式）

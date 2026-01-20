@@ -102,25 +102,37 @@ int main(int argc, char* argv[])
             
             // 基础功能测试
             if (test_mode == "basic") {
-                // 检查参数：支持三种模式
+                // 检查参数：支持多种模式
                 // 模式1: basic <torrent文件> <保存路径> - 只测试下载
                 // 模式2: basic <torrent文件> <保存路径> --seed - 只测试做种
                 // 模式3: basic <torrent文件> <下载保存路径> <做种保存路径> - 测试下载和做种
+                // 模式4: basic <torrent文件> <保存路径> --peer <IP:端口> - 下载并手动添加peer
                 if (argc < 5) {
                     std::cout << "用法1（仅下载）: " << argv[0] << " -t basic <torrent文件> <下载保存路径>" << std::endl;
                     std::cout << "用法2（仅做种）: " << argv[0] << " -t basic <torrent文件> <做种保存路径> --seed" << std::endl;
                     std::cout << "用法3（下载+做种）: " << argv[0] << " -t basic <torrent文件> <下载保存路径> <做种保存路径>" << std::endl;
+                    std::cout << "用法4（下载+手动peer）: " << argv[0] << " -t basic <torrent文件> <下载保存路径> --peer <IP:端口>" << std::endl;
                     std::cout << std::endl;
                     std::cout << "说明:" << std::endl;
                     std::cout << "  如果只提供保存路径，则只测试下载功能" << std::endl;
                     std::cout << "  如果提供 --seed 标志，则只测试做种功能" << std::endl;
                     std::cout << "  如果提供两个路径，则同时测试下载和做种功能" << std::endl;
+                    std::cout << "  如果提供 --peer 标志和 IP:端口，则手动添加做种端（用于 Tracker 不可用时）" << std::endl;
                     return 1;
                 }
                 
                 std::string torrent_path = argv[3];
                 std::string path1 = argv[4];
                 std::string path2 = (argc >= 6) ? argv[5] : "";
+                std::string peer_addr = "";  // 手动添加的 peer 地址
+                
+                // 检查是否有 --peer 参数
+                for (int i = 5; i < argc - 1; i++) {
+                    if (std::string(argv[i]) == "--peer") {
+                        peer_addr = argv[i + 1];
+                        break;
+                    }
+                }
                 
                 // 判断模式
                 bool test_download = false;
@@ -133,6 +145,11 @@ int main(int argc, char* argv[])
                     test_download = false;
                     test_seeding = true;
                     seeding_save_path = path1;
+                } else if (path2 == "--peer") {
+                    // 模式4: 下载并手动添加 peer
+                    test_download = true;
+                    test_seeding = false;
+                    download_save_path = path1;
                 } else if (!path2.empty()) {
                     // 模式3: 同时测试下载和做种
                     test_download = true;
@@ -155,6 +172,28 @@ int main(int argc, char* argv[])
                     download_hash = manager1.start_download(torrent_path, download_save_path);
                     if (!download_hash.empty()) {
                         std::cout << "✓ 下载任务启动成功，info_hash: " << download_hash.substr(0, 16) << "..." << std::endl;
+                        
+                        // 如果指定了 peer 地址，手动添加
+                        if (!peer_addr.empty()) {
+                            std::cout << "正在手动添加 peer: " << peer_addr << std::endl;
+                            
+                            // 解析 IP:端口
+                            std::string peer_ip;
+                            int peer_port = 6881;  // 默认端口
+                            size_t colon_pos = peer_addr.find(':');
+                            if (colon_pos != std::string::npos) {
+                                peer_ip = peer_addr.substr(0, colon_pos);
+                                peer_port = std::stoi(peer_addr.substr(colon_pos + 1));
+                            } else {
+                                peer_ip = peer_addr;
+                            }
+                            
+                            if (manager1.add_peer(download_hash, peer_ip, peer_port)) {
+                                std::cout << "✓ 已手动添加 peer: " << peer_ip << ":" << peer_port << std::endl;
+                            } else {
+                                std::cerr << "✗ 添加 peer 失败" << std::endl;
+                            }
+                        }
                     } else {
                         std::cerr << "✗ 下载任务启动失败" << std::endl;
                         return 1;
@@ -254,20 +293,43 @@ int main(int argc, char* argv[])
                 std::cout << std::endl;
                 
                 // 测试6: 运行状态监控
-                std::cout << "[测试6] 运行状态监控（10秒）..." << std::endl;
+                std::cout << "[测试6] 运行状态监控..." << std::endl;
+                std::cout << "按 Ctrl+C 退出，每10秒显示详细状态" << std::endl;
+                std::cout << std::endl;
+                
+                // 先显示网络状态诊断
+                std::cout << "=== 初始网络状态诊断 ===" << std::endl;
+                manager1.print_session_status();
+                
                 int counter = 0;
-                while (counter < 10) {
+                while (true) {
                     manager1.wait_and_process(1000);
                     counter++;
                     
-                    if (counter % 5 == 0) {
+                    // 每10秒显示详细状态
+                    if (counter % 10 == 0) {
                         std::cout << std::endl;
                         std::cout << "=== 当前状态（" << counter << "秒） ===" << std::endl;
+                        
+                        // 显示网络和 peer 状态
+                        manager1.print_session_status();
+                        
+                        // 显示 torrent 状态
                         if (test_download && !download_hash.empty()) {
                             manager1.print_torrent_status(download_hash);
                         }
                         if (test_seeding && !seeding_hash.empty()) {
                             manager1.print_torrent_status(seeding_hash);
+                        }
+                    }
+                    
+                    // 每秒显示简要进度
+                    if (test_download && !download_hash.empty()) {
+                        TorrentStatus st = manager1.get_torrent_status(download_hash);
+                        if (st.is_valid) {
+                            std::cout << "\r下载进度: " << (st.progress * 100.0) << "% "
+                                      << "速度: " << format_bytes(st.download_rate) << "/s "
+                                      << "Peers: " << st.peer_count << "  " << std::flush;
                         }
                     }
                 }

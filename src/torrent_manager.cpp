@@ -6,12 +6,13 @@
 #include <libtorrent/torrent_status.hpp>
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/torrent_info.hpp>
+#include <libtorrent/socket.hpp>
+#include <boost/asio/ip/address.hpp>
 #include <sstream>
 #include <thread>
 #include <chrono>
 #include <cstdio>
 #include <algorithm>
-#include <sstream>
 
 // 辅助函数：格式化字节数
 static std::string format_bytes(std::int64_t bytes)
@@ -78,18 +79,21 @@ void TorrentManager::configure_session()
                          lt::alert::status_notification | 
                          lt::alert::error_notification |
                          lt::alert::peer_notification |
-                         lt::alert::storage_notification);
+                         lt::alert::storage_notification |
+                         lt::alert::tracker_notification);  // 添加 tracker 通知
         
-        // 设置监听接口（空字符串表示自动选择）
-        settings.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:0");
+        // 设置监听接口
+        // 使用 6881-6891 端口范围，libtorrent 会自动选择可用端口
+        // 格式: "IP:端口" 或 "0.0.0.0:端口" 表示所有接口
+        settings.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881-6891,[::]:6881-6891");
         
-        // 启用 DHT（下载需要，做种可选）
+        // 启用 DHT（对等节点发现的重要方式）
         settings.set_bool(lt::settings_pack::enable_dht, true);
         
-        // 启用本地服务发现
+        // 启用本地服务发现（局域网内发现其他客户端）
         settings.set_bool(lt::settings_pack::enable_lsd, true);
         
-        // 启用 UPnP 和 NAT-PMP
+        // 启用 UPnP 和 NAT-PMP（自动端口映射）
         settings.set_bool(lt::settings_pack::enable_upnp, true);
         settings.set_bool(lt::settings_pack::enable_natpmp, true);
         
@@ -109,10 +113,33 @@ void TorrentManager::configure_session()
         // 设置磁盘写入队列大小（大文件需要更大的队列）
         settings.set_int(lt::settings_pack::max_queued_disk_bytes, 1024 * 1024 * 1024); // 1GB
         
+        // 允许来自同一 IP 的多个连接（用于本地测试）
+        settings.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true);
+        
+        // 设置 announce 间隔（更频繁地向 tracker 报告）
+        settings.set_int(lt::settings_pack::min_announce_interval, 30);
+        
+        // 允许传入连接
+        settings.set_bool(lt::settings_pack::enable_incoming_tcp, true);
+        settings.set_bool(lt::settings_pack::enable_incoming_utp, true);
+        settings.set_bool(lt::settings_pack::enable_outgoing_tcp, true);
+        settings.set_bool(lt::settings_pack::enable_outgoing_utp, true);
+        
+        // 设置 DHT 引导节点（加速 DHT 网络发现）
+        settings.set_str(lt::settings_pack::dht_bootstrap_nodes,
+            "router.bittorrent.com:6881,"
+            "router.utorrent.com:6881,"
+            "dht.transmissionbt.com:6881,"
+            "dht.aelitis.com:6881");
+        
         // 创建 session
         session_ = std::make_unique<lt::session>(settings);
         
-        std::cout << "TorrentManager 会话已初始化（支持并发下载和做种）" << std::endl;
+        std::cout << "TorrentManager 会话已初始化（监听端口范围: 6881-6891）" << std::endl;
+        std::cout << "  - DHT: 启用（含引导节点）" << std::endl;
+        std::cout << "  - LSD (本地发现): 启用" << std::endl;
+        std::cout << "  - UPnP/NAT-PMP: 启用" << std::endl;
+        std::cout << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "初始化 TorrentManager 会话失败: " << e.what() << std::endl;
         throw;
@@ -204,6 +231,24 @@ std::string TorrentManager::start_download(const std::string& torrent_path, cons
         // 获取 torrent 文件大小
         std::int64_t torrent_size = ti.total_size();
         
+        // 显示 torrent 详细信息
+        std::cout << "Torrent 详情:" << std::endl;
+        std::cout << "  文件大小: " << format_bytes(torrent_size) << std::endl;
+        std::cout << "  分片大小: " << format_bytes(ti.piece_length()) << std::endl;
+        std::cout << "  分片数量: " << ti.num_pieces() << std::endl;
+        std::cout << "  文件数量: " << ti.num_files() << std::endl;
+        
+        // 显示 torrent 中的 tracker 信息
+        std::vector<lt::announce_entry> trackers = ti.trackers();
+        if (!trackers.empty()) {
+            std::cout << "Torrent 包含 " << trackers.size() << " 个 Tracker:" << std::endl;
+            for (const auto& tracker : trackers) {
+                std::cout << "  - " << tracker.url << std::endl;
+            }
+        } else {
+            std::cout << "警告: Torrent 没有包含 Tracker，将仅使用 DHT/LSD 发现对等节点" << std::endl;
+        }
+        
         // 创建 add_torrent_params
         lt::add_torrent_params params;
         params.ti = std::make_shared<lt::torrent_info>(ti);
@@ -223,6 +268,7 @@ std::string TorrentManager::start_download(const std::string& torrent_path, cons
             std::cout << "使用手动下载模式（跳过自动管理）..." << std::endl;
         } else {
             params.flags |= lt::torrent_flags::auto_managed;
+            params.flags &= ~lt::torrent_flags::paused;  // 确保不处于暂停状态
         }
         
         // 添加 torrent 到 session
@@ -250,11 +296,17 @@ std::string TorrentManager::start_download(const std::string& torrent_path, cons
             
             std::cout << "已强制开始下载..." << std::endl;
         } else {
-            th.set_max_connections(50);
+            th.set_max_connections(100);
         }
         
         // 确保下载已开始
         th.resume();
+        
+        // 强制向 tracker 发送 announce 请求
+        th.force_reannounce();
+        
+        // 强制进行 DHT announce
+        th.force_dht_announce();
         
         // 保存 torrent 信息
         TorrentInfo info;
@@ -273,6 +325,7 @@ std::string TorrentManager::start_download(const std::string& torrent_path, cons
         std::cout << "文件大小: " << format_bytes(torrent_size) << std::endl;
         // 此处已持有 mutex_，使用无锁版本避免死锁
         std::cout << "当前下载任务数: " << get_download_count_unsafe() << std::endl;
+        std::cout << "正在向 Tracker 和 DHT 网络请求对等节点..." << std::endl;
         std::cout << std::endl;
         
         // 等待 torrent 状态更新
@@ -322,6 +375,17 @@ std::string TorrentManager::start_seeding(const std::string& torrent_path, const
         
         // 获取 torrent 文件大小
         std::int64_t torrent_size = ti.total_size();
+        
+        // 显示 torrent 中的 tracker 信息
+        std::vector<lt::announce_entry> trackers = ti.trackers();
+        if (!trackers.empty()) {
+            std::cout << "Torrent 包含 " << trackers.size() << " 个 Tracker:" << std::endl;
+            for (const auto& tracker : trackers) {
+                std::cout << "  - " << tracker.url << std::endl;
+            }
+        } else {
+            std::cout << "警告: Torrent 没有包含 Tracker，将仅使用 DHT/LSD 发布做种信息" << std::endl;
+        }
         
         // 验证文件是否存在（快速检查第一个文件）
         namespace fs = std::filesystem;
@@ -375,6 +439,15 @@ std::string TorrentManager::start_seeding(const std::string& torrent_path, const
             return "";
         }
         
+        // 设置更多连接数
+        th.set_max_connections(100);
+        
+        // 强制向 tracker 发送 announce 请求
+        th.force_reannounce();
+        
+        // 强制进行 DHT announce
+        th.force_dht_announce();
+        
         // 保存 torrent 信息
         TorrentInfo info;
         info.handle = th;
@@ -392,6 +465,7 @@ std::string TorrentManager::start_seeding(const std::string& torrent_path, const
         std::cout << "Torrent 大小: " << format_bytes(torrent_size) << std::endl;
         // 此处已持有 mutex_，使用无锁版本避免死锁
         std::cout << "当前做种任务数: " << get_seeding_count_unsafe() << std::endl;
+        std::cout << "正在向 Tracker 和 DHT 网络发布做种信息..." << std::endl;
         std::cout << std::endl;
         
         // 等待 torrent 状态更新
@@ -824,7 +898,22 @@ bool TorrentManager::wait_and_process(int timeout_ms)
                     std::cout << std::endl;
                 }
             } else if (lt::alert_cast<lt::tracker_announce_alert>(alert)) {
-                // 可以在这里记录 tracker 公告信息（可选）
+                // Tracker 公告信息（静默处理）
+            } else if (lt::alert_cast<lt::tracker_error_alert>(alert)) {
+                // Tracker 错误（静默处理，不再输出详细信息）
+                // 如果需要调试，可以取消下面的注释
+                // auto* tea = lt::alert_cast<lt::tracker_error_alert>(alert);
+                // if (tea) {
+                //     std::cerr << "Tracker 错误 [" << tea->tracker_url() << "]: " 
+                //               << tea->error.message() << std::endl;
+                // }
+            } else if (lt::alert_cast<lt::tracker_reply_alert>(alert)) {
+                // Tracker 回复（静默处理）
+                // 如果需要调试，可以取消下面的注释
+                // auto* tra = lt::alert_cast<lt::tracker_reply_alert>(alert);
+                // if (tra) {
+                //     std::cout << "Tracker: 发现 " << tra->num_peers << " 个 peers" << std::endl;
+                // }
             } else if (lt::alert_cast<lt::torrent_error_alert>(alert)) {
                 auto* tea = lt::alert_cast<lt::torrent_error_alert>(alert);
                 if (tea) {
@@ -839,14 +928,64 @@ bool TorrentManager::wait_and_process(int timeout_ms)
             } else if (lt::alert_cast<lt::state_changed_alert>(alert)) {
                 auto* sca = lt::alert_cast<lt::state_changed_alert>(alert);
                 if (sca) {
-                    // 状态改变时的处理（可选）
+                    // 状态改变时的处理
+                    const char* state_name = "未知状态";
+                    switch (sca->state) {
+                        case lt::torrent_status::checking_files:
+                            state_name = "检查文件中";
+                            break;
+                        case lt::torrent_status::downloading_metadata:
+                            state_name = "下载元数据";
+                            break;
+                        case lt::torrent_status::downloading:
+                            state_name = "下载中";
+                            break;
+                        case lt::torrent_status::finished:
+                            state_name = "已完成";
+                            break;
+                        case lt::torrent_status::seeding:
+                            state_name = "做种中";
+                            break;
+                        case lt::torrent_status::allocating:
+                            state_name = "分配空间中";
+                            break;
+                        default:
+                            state_name = "其他状态";
+                            break;
+                    }
+                    std::cout << "状态改变: " << state_name << std::endl;
                 }
+            } else if (lt::alert_cast<lt::peer_connect_alert>(alert)) {
+                // Peer 连接（可选：调试用）
+                // auto* pca = lt::alert_cast<lt::peer_connect_alert>(alert);
+                // if (pca) {
+                //     std::cout << "Peer 连接: " << pca->endpoint.address().to_string() << std::endl;
+                // }
             }
         }
         
-        // 更新 torrent 状态（清理无效的）
+        // 对于下载任务，定期检查并确保下载没有被意外暂停
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& pair : torrents_) {
+                TorrentInfo& info = pair.second;
+                if (info.type == TorrentType::Download && info.handle.is_valid()) {
+                    try {
+                        lt::torrent_status status = info.handle.status();
+                        
+                        // 如果不在检查文件状态且被暂停了，强制恢复
+                        if (status.state != lt::torrent_status::checking_files &&
+                            status.state != lt::torrent_status::checking_resume_data &&
+                            (status.flags & lt::torrent_flags::paused)) {
+                            info.handle.resume();
+                        }
+                    } catch (...) {
+                        // 忽略状态检查错误
+                    }
+                }
+            }
+            
+            // 更新 torrent 状态（清理无效的）
             update_torrents();
         }
         
@@ -871,8 +1010,8 @@ void TorrentManager::print_all_status() const
     }
     
     std::cout << "=== 当前 Torrent 状态 (总数: " << torrents_.size() 
-              << ", 下载: " << get_download_count() 
-              << ", 做种: " << get_seeding_count() << ") ===" << std::endl;
+              << ", 下载: " << get_download_count_unsafe() 
+              << ", 做种: " << get_seeding_count_unsafe() << ") ===" << std::endl;
     std::cout << std::endl;
     
     int index = 0;
@@ -925,6 +1064,18 @@ void TorrentManager::print_all_status() const
             std::cout << "下载速度: " << format_speed(status.download_rate) << std::endl;
             std::cout << "是否暂停: " << (status.flags & lt::torrent_flags::paused ? "是" : "否") << std::endl;
             
+            // 显示 tracker 简要状态
+            std::vector<lt::announce_entry> trackers = info.handle.trackers();
+            if (!trackers.empty()) {
+                int working = 0;
+                for (const auto& t : trackers) {
+                    if (t.is_working()) working++;
+                }
+                std::cout << "Tracker: " << working << "/" << trackers.size() << " 工作正常" << std::endl;
+            } else {
+                std::cout << "Tracker: 无 (仅使用 DHT/LSD)" << std::endl;
+            }
+            
             std::cout << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "[Torrent #" << index << "] 获取状态时出错: " << e.what() << std::endl;
@@ -970,5 +1121,120 @@ void TorrentManager::print_torrent_status(const std::string& info_hash) const
     std::cout << "下载速度: " << format_speed(ts.download_rate) << std::endl;
     std::cout << "是否暂停: " << (ts.is_paused ? "是" : "否") << std::endl;
     std::cout << "是否完成: " << (ts.is_finished ? "是" : "否") << std::endl;
+    std::cout << std::endl;
+}
+
+// 手动添加 peer
+bool TorrentManager::add_peer(const std::string& info_hash, const std::string& ip, int port)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    auto it = torrents_.find(info_hash);
+    if (it == torrents_.end() || !it->second.handle.is_valid()) {
+        std::cerr << "错误: 未找到指定的 torrent (info_hash: " << info_hash << ")" << std::endl;
+        return false;
+    }
+    
+    try {
+        // 解析 IP 地址
+        boost::system::error_code ec;
+        boost::asio::ip::address addr = boost::asio::ip::make_address(ip, ec);
+        if (ec) {
+            std::cerr << "错误: 无效的 IP 地址: " << ip << std::endl;
+            return false;
+        }
+        
+        // 创建 endpoint
+        lt::tcp::endpoint endpoint(addr, static_cast<unsigned short>(port));
+        
+        // 添加 peer
+        it->second.handle.connect_peer(endpoint);
+        
+        std::cout << "已添加 peer: " << ip << ":" << port << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "添加 peer 时出错: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// 打印网络/会话状态
+void TorrentManager::print_session_status() const
+{
+    if (!session_) {
+        std::cout << "Session 未初始化" << std::endl;
+        return;
+    }
+    
+    std::cout << "=== Session 网络状态 ===" << std::endl;
+    
+    // 获取 DHT 状态
+    if (session_->is_dht_running()) {
+        std::cout << "DHT 状态: 运行中" << std::endl;
+    } else {
+        std::cout << "DHT 状态: 未运行" << std::endl;
+    }
+    
+    // 显示实际监听的端口
+    std::cout << "监听端口: ";
+    std::vector<lt::alert*> temp_alerts;
+    session_->pop_alerts(&temp_alerts);
+    for (lt::alert* a : temp_alerts) {
+        if (auto* la = lt::alert_cast<lt::listen_succeeded_alert>(a)) {
+            std::cout << la->address.to_string() << ":" << la->port << " ";
+        }
+    }
+    // 如果没有监听成功的 alert，显示配置值
+    std::cout << "(配置范围: 6881-6891)" << std::endl;
+    
+    // 获取并显示所有 torrent 的详细 peer 信息
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& pair : torrents_) {
+        const TorrentInfo& info = pair.second;
+        if (!info.handle.is_valid()) continue;
+        
+        std::cout << std::endl;
+        std::cout << "--- Torrent: " << info.info_hash.substr(0, 8) << "... ---" << std::endl;
+        
+        // 获取 peer 列表
+        std::vector<lt::peer_info> peers;
+        info.handle.get_peer_info(peers);
+        
+        std::cout << "连接的 Peers: " << peers.size() << std::endl;
+        for (const auto& peer : peers) {
+            std::cout << "  - " << peer.ip.address().to_string() 
+                      << ":" << peer.ip.port();
+            
+            // 显示 peer 来源
+            std::cout << " [来源: ";
+            if (peer.source & lt::peer_info::tracker) std::cout << "Tracker ";
+            if (peer.source & lt::peer_info::dht) std::cout << "DHT ";
+            if (peer.source & lt::peer_info::pex) std::cout << "PEX ";
+            if (peer.source & lt::peer_info::lsd) std::cout << "LSD ";
+            if (peer.source & lt::peer_info::incoming) std::cout << "入站 ";
+            std::cout << "]";
+            
+            // 显示客户端
+            std::cout << " 客户端: " << peer.client;
+            
+            std::cout << std::endl;
+        }
+        
+        // 显示 Tracker 简要状态（只显示工作正常的）
+        std::vector<lt::announce_entry> trackers = info.handle.trackers();
+        if (!trackers.empty()) {
+            int working_count = 0;
+            int total_count = static_cast<int>(trackers.size());
+            
+            for (const auto& tracker : trackers) {
+                if (tracker.is_working()) {
+                    working_count++;
+                }
+            }
+            
+            std::cout << "Tracker: " << working_count << "/" << total_count << " 工作正常" << std::endl;
+        }
+    }
+    
     std::cout << std::endl;
 }
