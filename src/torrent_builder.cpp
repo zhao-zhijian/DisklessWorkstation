@@ -297,13 +297,42 @@ bool TorrentBuilder::create_torrent(const std::string& file_path, const std::str
             // 对于大文件，输出进度提示
             std::cout << "开始计算哈希值..." << std::endl;
             std::cout << "使用根路径: " << libtorrent_path << std::endl;
-            std::cout << "注意：对于 50GB+ 的大文件，这可能需要几分钟到十几分钟，请耐心等待..." << std::endl;
+            const std::int64_t very_large_threshold = 50LL * 1024 * 1024 * 1024; // 50GB
+            if (fs_storage.total_size() > very_large_threshold) {
+                std::cout << "注意：对于 50GB+ 的大文件，这可能需要几分钟到十几分钟，请耐心等待..." << std::endl;
+            }
             std::cout << "正在处理中，请勿中断程序..." << std::flush;
             
             // 使用 set_piece_hashes 计算哈希值
             // 这个函数会读取所有文件并计算每个分片的 SHA1 哈希
-            // 错误 995 可能是由于路径不匹配、文件句柄限制或其他资源问题
+            // 在 Windows 上，错误 995 可能是由于路径不匹配、文件句柄限制或其他资源问题
+#ifdef _WIN32
+            const int max_retries = 3;
+            int attempt = 0;
+            while (true) {
+                ++attempt;
+                lt::error_code ec;
+                lt::set_piece_hashes(torrent, libtorrent_path.c_str(), ec);
+                
+                if (!ec) {
+                    break;
+                }
+                
+                // 特殊处理 Windows 错误 995：I/O 操作被中止
+                if (ec.category() == lt::system_category() && ec.value() == 995 && attempt < max_retries) {
+                    std::cerr << std::endl;
+                    std::cerr << "警告: 计算文件哈希值时 I/O 操作被中止 (错误代码: 995)，正在进行第 "
+                              << attempt << " 次重试..." << std::endl;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                
+                // 其他错误或重试仍失败，抛出系统错误由外层处理
+                throw std::system_error(ec);
+            }
+#else
             lt::set_piece_hashes(torrent, libtorrent_path.c_str());
+#endif
             
             std::cout << "\r文件哈希值计算完成！                              " << std::endl;
         } catch (const std::system_error& e) {
@@ -427,14 +456,12 @@ std::string TorrentBuilder::determine_root_path(const std::string& file_path)
     std::string root_path;
     
     if (fs::is_directory(path_obj)) {
-        // 如果是目录，使用目录的父目录作为根路径
-        // 因为 libtorrent 通常会在 storage 中保持目录名作为路径的一部分
+        // 如果是目录，优先使用目录的父目录作为根路径
+        // 对于 "D:/SQLiteStudio" 这种直接位于盘符根下的目录：
+        // - parent_path() 为 "D:/"
+        // - storage 中文件路径类似 "SQLiteStudio/Qt5Core.dll"
+        //   此时 root_path 应该是 "D:/"，否则会变成 "D:/SQLiteStudio/SQLiteStudio/Qt5Core.dll"
         root_path = path_obj.parent_path().string();
-        
-        // 如果父目录为空或只有根路径，使用目录本身
-        if (root_path.empty() || root_path == path_obj.root_path().string()) {
-            root_path = path_obj.string();
-        }
     } else {
         // 如果是文件，使用文件的父目录作为根路径
         root_path = path_obj.parent_path().string();
